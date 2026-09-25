@@ -256,7 +256,30 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 * An unresolvable saved audio device, or one the driver refuses to open, falls back to the system default and says so — on both the microphone and the speakers.
 * A rejected session-resumption handle is dropped after one attempt, so an expired handle can never be replayed on every retry and prevent the reconnect it exists to protect.
 
+### 📱 Android Phone Control (Wireless ADB)
 
+Control your Android phone over your local Wi-Fi without taking it out of your pocket.
+
+#### Setup Guide:
+1. **Enable Developer Options on your phone**: Settings → About Phone → tap "Build Number" 7 times.
+2. **Enable Wireless Debugging**: Settings → System / Developer Options → toggle **Wireless Debugging** to ON.
+3. **Get the Phone's IP & Port**: Tap "Wireless debugging" to view your device's Wi-Fi IP and port (e.g. `192.168.1.105:5555`).
+4. **Connect / Pair via ADB**:
+   ```bash
+   adb connect <phone_ip>:5555
+   ```
+   Accept the "Always allow from this computer" prompt on your phone screen.
+5. **Save Phone IP in JARVIS**:
+   Click **⚙ → 📱 ANDROID PHONE** in the settings drawer, enter the IP (e.g. `192.168.1.105`), and click **SAVE IP**.
+
+#### Supported Voice Commands:
+- *"Phone e flashlight on koro"* / *"Flashlight off koro phone e"*
+- *"Phone er volume kome dao"* / *"Phone volume baraw"* / *"Phone mute koro"*
+- *"WhatsApp open koro phone e"* / *"YouTube open koro phone e"* / *"Camera open koro phone e"*
+- *"Phone er screenshot nao"* (saved to local `screenshots/` directory)
+- *"Phone er battery koto?"*
+- *"Phone lock koro"*
+- *"List connected phone devices"*
 
 ---
 

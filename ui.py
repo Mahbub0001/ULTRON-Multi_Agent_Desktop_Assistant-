@@ -2150,6 +2150,101 @@ class AudioDeviceOverlay(_HudOverlay):
             self.picked.emit()
 
 
+class AndroidDeviceOverlay(_HudOverlay):
+    """Configure Android phone wireless ADB connection."""
+
+    saved = pyqtSignal(str)
+    _OW = 460
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from memory.config_manager import get_android_ip
+
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            AndroidDeviceOverlay {{
+                background: rgba(0, 6, 10, 245);
+                border: 1px solid {C.BORDER_B};
+                border-radius: 6px;
+            }}
+        """)
+        self.setFixedWidth(self._OW)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(6)
+
+        hdr = QLabel("📱  ANDROID PHONE (ADB)")
+        hdr.setFont(QFont("Courier New", 12, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
+        lay.addWidget(hdr)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        lay.addWidget(sep)
+
+        cap = QLabel("PHONE WI-FI IP — Wireless debugging IP:port")
+        cap.setFont(QFont("Courier New", 8))
+        cap.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        lay.addWidget(cap)
+
+        self._ip_edit = QLineEdit(get_android_ip())
+        self._ip_edit.setFont(QFont("Courier New", 10))
+        self._ip_edit.setFixedHeight(30)
+        self._ip_edit.setPlaceholderText("192.168.1.xxx or 192.168.1.xxx:5555")
+        self._ip_edit.setStyleSheet(
+            f"QLineEdit {{ background: #000d12; color: {C.TEXT}; "
+            f"border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}"
+            f"QLineEdit:focus {{ border: 1px solid {C.PRI}; }}"
+        )
+        lay.addWidget(self._ip_edit)
+
+        note = QLabel(
+            "Instructions:\n"
+            "1. Phone Settings -> Developer Options -> Enable Wireless Debugging.\n"
+            "2. Note the IP & port shown under Wireless debugging.\n"
+            "3. Enter the IP here and save. Phone and PC must be on the same Wi-Fi."
+        )
+        note.setWordWrap(True)
+        note.setFont(QFont("Courier New", 7))
+        note.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        lay.addSpacing(4)
+        lay.addWidget(note)
+
+        row = QHBoxLayout(); row.setSpacing(8)
+        save_btn = QPushButton("▸  SAVE IP")
+        save_btn.setFixedHeight(32)
+        save_btn.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.PRI};
+                border: 1px solid {C.PRI_DIM}; border-radius: 3px; }}
+            QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}
+        """)
+        save_btn.clicked.connect(self._apply)
+        row.addWidget(save_btn)
+
+        close_btn = QPushButton("CLOSE")
+        close_btn.setFixedHeight(32)
+        close_btn.setFont(QFont("Courier New", 9))
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 3px; }}
+            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+        """)
+        close_btn.clicked.connect(self.hide)
+        row.addWidget(close_btn)
+        lay.addLayout(row)
+
+    def _apply(self):
+        from memory.config_manager import save_android_ip
+        ip = self._ip_edit.text().strip()
+        save_android_ip(ip)
+        self.saved.emit(ip)
+        self.hide()
+
+
 class MemoryOverlay(_HudOverlay):
     """Everything JARVIS has stored about you, and when it learned it.
 
@@ -3969,6 +4064,15 @@ class MainWindow(QMainWindow):
         audio_btn.clicked.connect(self._open_audio_devices)
         lay.addWidget(audio_btn)
 
+        self._phone_btn = QPushButton()
+        self._phone_btn.setFixedHeight(26)
+        self._phone_btn.setFont(QFont("Courier New", 7))
+        self._phone_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._phone_btn.setStyleSheet(_BTN_STYLE_DIM)
+        self._phone_btn.clicked.connect(self._open_android_settings)
+        lay.addWidget(self._phone_btn)
+        self._refresh_phone_btn()
+
         self._cam_btn = QPushButton()
         self._cam_btn.setFixedHeight(26)
         self._cam_btn.setFont(QFont("Courier New", 7))
@@ -4009,6 +4113,7 @@ class MainWindow(QMainWindow):
         if checked:
             self._refresh_wake_btns()   # resolve wake state on open (lazy)
             self._refresh_cam_btn()
+            self._refresh_phone_btn()
             self._position_quick_drawer()
             self._quick_drawer.show()
             self._quick_drawer.raise_()
@@ -5039,6 +5144,26 @@ class MainWindow(QMainWindow):
         self._log.append_log("SYS: Audio devices updated.")
         if self.on_audio_device_change:
             self.on_audio_device_change()
+
+    # ── Android Phone ────────────────────────────────────────────────────────
+
+    def _open_android_settings(self):
+        ov = AndroidDeviceOverlay(parent=self.centralWidget())
+        ov.saved.connect(self._on_android_ip_saved)
+        self._centre_overlay(ov)
+        self._android_overlay = ov            # keep a reference so it isn't GC'd
+
+    def _on_android_ip_saved(self, ip: str):
+        self._refresh_phone_btn()
+        self._log.append_log(f"SYS: Android phone IP saved ({ip or 'cleared'}).")
+
+    def _refresh_phone_btn(self):
+        if not hasattr(self, "_phone_btn"):
+            return
+        from memory.config_manager import get_android_ip
+        ip = get_android_ip()
+        label = f"📱  PHONE: {ip}" if ip else "📱  ANDROID PHONE"
+        self._phone_btn.setText(label)
 
     # ── Camera devices ───────────────────────────────────────────────────────
 

@@ -323,6 +323,16 @@ def save_output_device(name: str) -> None:
     _patch_config(output_device=(name or "").strip())
 
 
+def get_android_ip() -> str:
+    """Configured Android device IP address for wireless ADB, or '' if unset."""
+    return (load_api_keys().get("android_device_ip", "") or "").strip()
+
+
+def save_android_ip(ip: str) -> None:
+    """Persist Android device IP address for wireless ADB."""
+    _patch_config(android_device_ip=(ip or "").strip())
+
+
 def get_plugin_enabled(plugin_name: str) -> bool:
     """Plugins are enabled by default the moment they're discovered (opt-out model)."""
     return load_api_keys().get("plugins_enabled", {}).get(plugin_name, True)
