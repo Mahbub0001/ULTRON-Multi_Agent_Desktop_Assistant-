@@ -1109,7 +1109,8 @@ class JarvisLive:
 
         print(f"[ULTRON] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
-
+        if self.audio_in_queue and self.audio_in_queue.empty():
+            self.set_speaking(False)
 
         if name == "save_memory":
             category = args.get("category", "notes")
@@ -1118,6 +1119,7 @@ class JarvisLive:
             if key and value:
                 update_memory({category: {key: {"value": value}}})
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+            self.set_speaking(False)
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
@@ -1225,7 +1227,14 @@ class JarvisLive:
                     args["file_path"] = self.ui.current_file
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": None}
-                r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
+                try:
+                    r = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx)),
+                        timeout=25.0
+                    )
+                except asyncio.TimeoutError:
+                    r = f"Action '{name}' timed out after 25 seconds, sir."
+                    print(f"[ULTRON] ⚠️  {r}")
                 result = r or "Done."
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
@@ -1238,10 +1247,17 @@ class JarvisLive:
 
             else:
                 if self._plugin_registry.has(name):
-                    r = await loop.run_in_executor(
-                        None,
-                        lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
-                    )
+                    try:
+                        r = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None,
+                                lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
+                            ),
+                            timeout=25.0
+                        )
+                    except asyncio.TimeoutError:
+                        r = f"Plugin '{name}' timed out after 25 seconds, sir."
+                        print(f"[ULTRON] ⚠️  {r}")
                     result = r or "Done."
                 else:
                     result = f"Unknown tool: {name}"
@@ -1251,6 +1267,8 @@ class JarvisLive:
             traceback.print_exc()
             self.speak_error(name, e)
 
+        # Release speaking state safely so the microphone is never locked in a deaf state
+        self.set_speaking(False)
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
 
@@ -1352,10 +1370,17 @@ class JarvisLive:
 
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                def _enqueue():
+                    if self.out_queue.full():
+                        try:
+                            self.out_queue.get_nowait()
+                        except Exception:
+                            pass
+                    try:
+                        self.out_queue.put_nowait({"data": data, "mime_type": "audio/pcm"})
+                    except Exception:
+                        pass
+                loop.call_soon_threadsafe(_enqueue)
                 # Feed the live mic level to the HUD so the waveform reacts to
                 # the user's actual voice while listening. Purely cosmetic — any
                 # failure here must never disturb the mic.
@@ -1575,10 +1600,20 @@ class JarvisLive:
                             print(f"[ULTRON] 📞 {fc.name}")
                             fr = await self._execute_tool(fc)
                             fn_responses.append(fr)
-                        await self.session.send_tool_response(
-                            function_responses=fn_responses
-                        )
-                        await self._flush_pending_vision()
+                        try:
+                            await self.session.send_tool_response(
+                                function_responses=fn_responses
+                            )
+                            await self._flush_pending_vision()
+                        except Exception as e:
+                            print(f"[ULTRON] ❌ send_tool_response failed: {e}")
+                            traceback.print_exc()
+                            raise
+                        if self.audio_in_queue and self.audio_in_queue.empty():
+                            self.set_speaking(False)
+
+                print("[ULTRON] ⚠️  Session receive stream closed by server.")
+                raise RuntimeError("Gemini Live session stream ended.")
         except Exception as e:
             print(f"[ULTRON] ❌ Recv: {e}")
             traceback.print_exc()
@@ -1629,13 +1664,17 @@ class JarvisLive:
             pass
 
         try:
+            consecutive_empty = 0
             while True:
                 try:
                     chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(),
                         timeout=0.1
                     )
+                    consecutive_empty = 0
                 except asyncio.TimeoutError:
+                    consecutive_empty += 1
+                    # Immediate release on completed turn
                     if (
                         self._turn_done_event
                         and self._turn_done_event.is_set()
@@ -1643,6 +1682,16 @@ class JarvisLive:
                     ):
                         self.set_speaking(False)
                         self._turn_done_event.clear()
+                        consecutive_empty = 0
+                    elif consecutive_empty >= 3 and self.audio_in_queue.empty():
+                        # Watchdog: no audio for >= 300ms means output stream has completely drained.
+                        # Do NOT keep speaking flag True indefinitely if turn_done_event was missed or omitted!
+                        with self._speaking_lock:
+                            was_speaking = self._is_speaking
+                        if was_speaking:
+                            self.set_speaking(False)
+                        if self._turn_done_event and self._turn_done_event.is_set():
+                            self._turn_done_event.clear()
                     continue
 
                 self.set_speaking(True)
