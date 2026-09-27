@@ -45,6 +45,32 @@ class TestAgentAction(unittest.TestCase):
         finally:
             mgr.dispatch_task = orig_dispatch
 
+    def test_agent_department_status_alice(self):
+        from actions.agent_town import agent_department
+        res = agent_department({"action": "status", "agent": "Alice"})
+        self.assertIn("Alice", res)
+        self.assertIn("Senior Research Analyst", res)
+        self.assertIn("FREE", res)
+
+    def test_agent_department_list(self):
+        from actions.agent_town import agent_department
+        res = agent_department({"action": "list"})
+        self.assertIn("Alice", res)
+        self.assertIn("Bob", res)
+        self.assertIn("Carol", res)
+        self.assertIn("Dave", res)
+
+    def test_delegate_agent_task_status_fallback(self):
+        res = delegate_agent_task({"agent": "Alice", "task": "is free"})
+        self.assertIn("Alice", res)
+        self.assertIn("FREE", res)
+
+    def test_agent_department_tools_exposed(self):
+        from actions.agent_town import TOOLS
+        names = [t["name"] for t in TOOLS]
+        self.assertIn("delegate_agent_task", names)
+        self.assertIn("agent_department", names)
+
 
 if __name__ == "__main__":
     unittest.main()
