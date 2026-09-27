@@ -213,10 +213,16 @@ def _move(x: int, y: int, duration: float = 0.3) -> str:
     return f"Mouse → ({x}, {y})"
 
 
-def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.5) -> str:
+def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.6) -> str:
     _require_pyautogui()
     pyautogui.moveTo(x1, y1, duration=0.2)
-    pyautogui.dragTo(x2, y2, duration=duration, button="left")
+    time.sleep(0.15)
+    pyautogui.mouseDown(button="left")
+    time.sleep(0.15)
+    pyautogui.moveTo(x2, y2, duration=duration)
+    time.sleep(0.15)
+    pyautogui.mouseUp(button="left")
+    time.sleep(0.1)
     return f"Dragged ({x1},{y1}) → ({x2},{y2})"
 
 
