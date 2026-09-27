@@ -25,7 +25,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QBrush, QColor, QConicalGradient, QDragEnterEvent, QDropEvent, QFont,
     QFontDatabase, QKeySequence, QLinearGradient, QPainter, QPainterPath,
-    QPen, QPixmap, QRadialGradient, QShortcut,
+    QPen, QPixmap, QPolygonF, QRadialGradient, QShortcut,
 )
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
@@ -3363,8 +3363,340 @@ class AgentCardWidget(QFrame):
             self.refresh_ui()
 
 
+class DeskNode:
+    def __init__(self, agent: Any, center: QPointF, desk_rect: QRectF):
+        self._agent = agent
+        self.center = center
+        self.rect = desk_rect
+        self.bubble_text: str = ""
+        self.bubble_opacity: float = 0.0
+        self.bubble_timer: int = 0
+        self.is_hovered: bool = False
+
+
+class TownOfficeCanvas(QWidget):
+    desk_clicked = pyqtSignal(str)  # emits agent name
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.setMinimumSize(560, 340)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        from core.agent_town import AgentTownManager
+        self._mgr = AgentTownManager.get_instance()
+        self._agents = self._mgr.get_all_agents()
+        self._desk_rects: dict[str, DeskNode] = {}
+        self._anim_frame: int = 0
+        self._data_packets: list[dict[str, Any]] = []
+        self._hovered_agent: Optional[str] = None
+        self._last_chat_tick: int = 0
+
+        self._layout_desks(self.width() or 740, self.height() or 420)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(33)  # ~30 FPS
+
+        self._mgr.register_listener(self._on_agent_event)
+
+    def _layout_desks(self, w: int, h: int) -> None:
+        self._desk_rects.clear()
+        agents_by_name = {a.name.lower(): a for a in self._agents}
+
+        dw, dh = 180.0, 110.0
+        coords = {
+            "alice": QPointF(w * 0.26, h * 0.30),
+            "bob":   QPointF(w * 0.74, h * 0.30),
+            "carol": QPointF(w * 0.26, h * 0.72),
+            "dave":  QPointF(w * 0.74, h * 0.72),
+        }
+
+        for ag_id, pt in coords.items():
+            ag = agents_by_name.get(ag_id)
+            if not ag:
+                continue
+            rect = QRectF(pt.x() - dw / 2, pt.y() - dh / 2, dw, dh)
+            self._desk_rects[ag.name.lower()] = DeskNode(ag, pt, rect)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._layout_desks(self.width(), self.height())
+
+    def _find_desk_at(self, pos: QPoint) -> Optional[DeskNode]:
+        for node in self._desk_rects.values():
+            if node.rect.contains(QPointF(pos)):
+                return node
+        return None
+
+    def mouseMoveEvent(self, event):
+        pos = event.pos()
+        node = self._find_desk_at(pos)
+        prev_hover = self._hovered_agent
+        if node:
+            self._hovered_agent = node._agent.name.lower()
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self._hovered_agent = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        for n in self._desk_rects.values():
+            n.is_hovered = (self._hovered_agent == n._agent.name.lower())
+
+        if prev_hover != self._hovered_agent:
+            self.update()
+
+    def mousePressEvent(self, event):
+        pos = event.pos()
+        node = self._find_desk_at(pos)
+        if node:
+            self.desk_clicked.emit(node._agent.name)
+            self._spawn_packet(node._agent.name.lower(), "center")
+
+    def _spawn_packet(self, from_id: str, to_id: str):
+        from_node = self._desk_rects.get(from_id)
+        if not from_node:
+            return
+        col = QColor(from_node._agent.color)
+        target_pt = QPointF(self.width() / 2, self.height() / 2) if to_id == "center" else (
+            self._desk_rects[to_id].center if to_id in self._desk_rects else from_node.center
+        )
+        self._data_packets.append({
+            "from": from_node.center,
+            "to": target_pt,
+            "progress": 0.0,
+            "color": col,
+        })
+
+    def _on_agent_event(self, agent: Any) -> None:
+        node = self._desk_rects.get(agent.name.lower())
+        if node:
+            state = getattr(agent, "state", "IDLE")
+            if state == "WORKING":
+                node.bubble_text = f"⚡ {agent.status_message or 'Executing task...'}"
+                node.bubble_opacity = 1.0
+                node.bubble_timer = 100
+            elif state == "COMPLETED":
+                node.bubble_text = "✓ Finished task!"
+                node.bubble_opacity = 1.0
+                node.bubble_timer = 120
+            elif state == "ERROR":
+                node.bubble_text = "! Encountered error"
+                node.bubble_opacity = 1.0
+                node.bubble_timer = 90
+
+    def _tick(self) -> None:
+        self._anim_frame += 1
+
+        # Ambient small-talk generator every ~120 frames (4 seconds)
+        if self._anim_frame - self._last_chat_tick > 120:
+            self._last_chat_tick = self._anim_frame
+            idle_nodes = [n for n in self._desk_rects.values() if getattr(n._agent, "state", "IDLE") == "IDLE"]
+            if idle_nodes:
+                speaker = random.choice(idle_nodes)
+                speaker.bubble_text = f'💬 "{speaker._agent.get_ambient_thought()}"'
+                speaker.bubble_opacity = 1.0
+                speaker.bubble_timer = 100
+
+                # Intermittently send an ambient collaboration ping
+                other_nodes = [n for n in self._desk_rects.values() if n != speaker]
+                if other_nodes and random.random() < 0.45:
+                    target = random.choice(other_nodes)
+                    self._spawn_packet(speaker._agent.name.lower(), target._agent.name.lower())
+
+        # Update speech bubbles opacity
+        for node in self._desk_rects.values():
+            if node.bubble_timer > 0:
+                node.bubble_timer -= 1
+                if node.bubble_timer < 20:
+                    node.bubble_opacity = max(0.0, node.bubble_timer / 20.0)
+            else:
+                node.bubble_opacity = 0.0
+
+        # Update data packets
+        active_packets = []
+        for pkt in self._data_packets:
+            pkt["progress"] += 0.035
+            if pkt["progress"] < 1.0:
+                active_packets.append(pkt)
+        self._data_packets = active_packets
+
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        center = QPointF(w / 2, h / 2)
+
+        # 1. Dark Cybernetic Floor Background
+        p.fillRect(0, 0, w, h, QColor("#010912"))
+
+        # Isometric Grid Lines
+        grid_pen = QPen(QColor(0, 212, 255, 18), 1)
+        p.setPen(grid_pen)
+        step = 36
+        for x in range(0, w, step):
+            p.drawLine(x, 0, x, h)
+        for y in range(0, h, step):
+            p.drawLine(0, y, w, y)
+
+        # 2. Central Hologram Core & Conduit Beams
+        core_r = 32.0 + math.sin(self._anim_frame * 0.06) * 3.0
+        core_grad = QRadialGradient(center, core_r)
+        core_grad.setColorAt(0.0, QColor(0, 212, 255, 60))
+        core_grad.setColorAt(0.7, QColor(0, 212, 255, 15))
+        core_grad.setColorAt(1.0, QColor(0, 212, 255, 0))
+        p.setBrush(QBrush(core_grad))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(center, core_r, core_r)
+
+        # Outer rotating core ticks
+        p.setPen(QPen(QColor(0, 212, 255, 70), 1, Qt.PenStyle.DashLine))
+        p.drawEllipse(center, 20.0, 20.0)
+
+        # Conduit Lines to each desk
+        for node in self._desk_rects.values():
+            glow_col = QColor(node._agent.color)
+            glow_col.setAlpha(45 if not node.is_hovered else 130)
+            p.setPen(QPen(glow_col, 1 if not node.is_hovered else 2, Qt.PenStyle.DashDotLine))
+            p.drawLine(center, node.center)
+
+        # 3. Animated Data Packets
+        for pkt in self._data_packets:
+            t = pkt["progress"]
+            pt = QPointF(
+                pkt["from"].x() + (pkt["to"].x() - pkt["from"].x()) * t,
+                pkt["from"].y() + (pkt["to"].y() - pkt["from"].y()) * t,
+            )
+            col = QColor(pkt["color"])
+            col.setAlpha(220)
+            p.setBrush(QBrush(col))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(pt, 4.0, 4.0)
+
+        # 4. Render Desks & Characters
+        for node in self._desk_rects.values():
+            self._draw_desk(p, node)
+
+        # 5. Render Floating Speech Bubbles (on top of all desks)
+        for node in self._desk_rects.values():
+            if node.bubble_opacity > 0.01 and node.bubble_text:
+                self._draw_speech_bubble(p, node)
+
+    def _draw_desk(self, p: QPainter, node: DeskNode) -> None:
+        agent = node._agent
+        rect = node.rect
+        color = QColor(agent.color)
+        hover = node.is_hovered
+        working = (getattr(agent, "state", "IDLE") == "WORKING")
+
+        # Workstation Platform
+        path = QPainterPath()
+        path.addRoundedRect(rect, 8, 8)
+        bg_col = QColor(1, 16, 26, 220) if not hover else QColor(3, 26, 42, 240)
+        p.setBrush(QBrush(bg_col))
+        border_col = color if hover else QColor(color.red(), color.green(), color.blue(), 90)
+        p.setPen(QPen(border_col, 2 if hover or working else 1))
+        p.drawPath(path)
+
+        # Workstation Title & Specialty Header inside desk
+        p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        p.setPen(color)
+        hdr_rect = QRectF(rect.x() + 8, rect.y() + 6, rect.width() - 16, 14)
+        p.drawText(hdr_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"DESK // {agent.name.upper()}")
+
+        # Status badge inside desk
+        st_state = getattr(agent, "state", "IDLE")
+        st_col = C.GREEN if st_state == "IDLE" else (C.PRI if st_state == "WORKING" else C.ACC2)
+        p.setFont(QFont("Courier New", 6, QFont.Weight.Bold))
+        p.setPen(QColor(st_col))
+        p.drawText(hdr_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"● {st_state}")
+
+        # Hologram Screen / Monitor Graphics
+        mon_rect = QRectF(rect.x() + 10, rect.y() + 24, rect.width() - 20, 24)
+        p.setBrush(QBrush(QColor(0, 10, 18, 180)))
+        p.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 50), 1))
+        p.drawRoundedRect(mon_rect, 3, 3)
+
+        # Micro terminal scan lines on monitor
+        p.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 80), 1))
+        for line_y in range(int(mon_rect.y()) + 4, int(mon_rect.bottom()) - 2, 4):
+            line_w = (int(mon_rect.width()) - 16) * ((math.sin(self._anim_frame * 0.1 + line_y) + 1) / 2)
+            p.drawLine(int(mon_rect.x()) + 6, line_y, int(mon_rect.x()) + 6 + int(line_w), line_y)
+
+        # Character Avatar (Floating with idle breathing)
+        bob_offset = math.sin(self._anim_frame * 0.08 + rect.x()) * 3.5
+        char_center = QPointF(rect.center().x(), rect.y() + 74 + bob_offset)
+        char_r = 16.0
+
+        # Avatar Glow Halo
+        halo_grad = QRadialGradient(char_center, char_r + 6)
+        halo_grad.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 120 if working else 60))
+        halo_grad.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0))
+        p.setBrush(QBrush(halo_grad))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(char_center, char_r + 6, char_r + 6)
+
+        # Avatar Base Circle
+        p.setBrush(QBrush(QColor("#000a12")))
+        p.setPen(QPen(color, 2 if hover or working else 1))
+        p.drawEllipse(char_center, char_r, char_r)
+
+        # Avatar Symbol
+        p.setFont(QFont("Courier New", 12))
+        p.setPen(QColor(C.WHITE))
+        sym_rect = QRectF(char_center.x() - 12, char_center.y() - 12, 24, 24)
+        p.drawText(sym_rect, Qt.AlignmentFlag.AlignCenter, agent.avatar_symbol)
+
+        # Role subtitle beneath avatar
+        p.setFont(QFont("Courier New", 6))
+        p.setPen(QColor(C.TEXT_DIM))
+        role_rect = QRectF(rect.x() + 4, rect.bottom() - 16, rect.width() - 8, 12)
+        p.drawText(role_rect, Qt.AlignmentFlag.AlignCenter, agent.role)
+
+    def _draw_speech_bubble(self, p: QPainter, node: DeskNode) -> None:
+        agent = node._agent
+        color = QColor(agent.color)
+        alpha = int(node.bubble_opacity * 255)
+        color.setAlpha(alpha)
+
+        text = node.bubble_text
+        if len(text) > 46:
+            text = text[:43] + "..."
+
+        p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        metrics = p.fontMetrics()
+        txt_w = metrics.horizontalAdvance(text) + 20
+        txt_h = 24
+
+        bw = max(110.0, float(txt_w))
+        bh = float(txt_h)
+        bx = node.center.x() - bw / 2
+        by = node.rect.y() - bh - 8
+
+        # Draw bubble body
+        bubble_rect = QRectF(bx, by, bw, bh)
+        bg = QColor(0, 12, 20, int(node.bubble_opacity * 240))
+        p.setBrush(QBrush(bg))
+        p.setPen(QPen(color, 1))
+        p.drawRoundedRect(bubble_rect, 5, 5)
+
+        # Pointer triangle
+        pointer = QPolygonF([
+            QPointF(node.center.x() - 5, by + bh),
+            QPointF(node.center.x() + 5, by + bh),
+            QPointF(node.center.x(), by + bh + 6),
+        ])
+        p.drawPolygon(pointer)
+
+        # Bubble Text
+        p.setPen(QColor(255, 255, 255, alpha))
+        p.drawText(bubble_rect, Qt.AlignmentFlag.AlignCenter, text)
+
+
 class AgentTownDrawer(QWidget):
-    _OW, _OH = 780, 520
+    _OW, _OH = 860, 580
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -3380,19 +3712,19 @@ class AgentTownDrawer(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(8)
+        root.setSpacing(6)
 
         # Header
         hdr = QHBoxLayout()
         title_box = QVBoxLayout()
-        title_box.setSpacing(2)
+        title_box.setSpacing(1)
 
         t_lbl = QLabel("◈  AGENT TOWN // LIVING OFFICE")
         t_lbl.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
         t_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         title_box.addWidget(t_lbl)
 
-        sub_lbl = QLabel("Autonomous multi-agent resident team operating inside Mark-LIV")
+        sub_lbl = QLabel("Autonomous multi-agent resident workplace operating inside Mark-LIV")
         sub_lbl.setFont(QFont("Courier New", 7))
         sub_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         title_box.addWidget(sub_lbl)
@@ -3416,11 +3748,43 @@ class AgentTownDrawer(QWidget):
         root.addLayout(hdr)
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        sep.setStyleSheet(f"color: {C.BORDER}; margin: 1px 0;")
         root.addWidget(sep)
 
-        grid = QGridLayout()
-        grid.setSpacing(10)
+        # View Switcher Bar (Living Floor vs Desk Cards)
+        switch_row = QHBoxLayout()
+        switch_row.setSpacing(6)
+
+        self._floor_view_btn = QPushButton("◈  LIVING OFFICE FLOOR")
+        self._floor_view_btn.setFixedHeight(26)
+        self._floor_view_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._floor_view_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._floor_view_btn.clicked.connect(lambda: self._set_view(0))
+        switch_row.addWidget(self._floor_view_btn)
+
+        self._cards_view_btn = QPushButton("≡  DESK CARDS & LOGS")
+        self._cards_view_btn.setFixedHeight(26)
+        self._cards_view_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._cards_view_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cards_view_btn.clicked.connect(lambda: self._set_view(1))
+        switch_row.addWidget(self._cards_view_btn)
+
+        switch_row.addStretch()
+        root.addLayout(switch_row)
+
+        # Stacked Views: 0 = Office Canvas, 1 = Desk Cards
+        self._stack = QStackedWidget()
+
+        # View 0: Interactive Cyber Office Floor
+        self._canvas = TownOfficeCanvas(self)
+        self._canvas.desk_clicked.connect(self._on_canvas_desk_clicked)
+        self._stack.addWidget(self._canvas)
+
+        # View 1: Detailed Desk Cards
+        cards_widget = QWidget()
+        grid = QGridLayout(cards_widget)
+        grid.setContentsMargins(0, 4, 0, 0)
+        grid.setSpacing(8)
 
         from core.agent_town import AgentTownManager, ResidentAgent
         self._mgr = AgentTownManager.get_instance()
@@ -3434,10 +3798,14 @@ class AgentTownDrawer(QWidget):
             c = idx % 2
             grid.addWidget(card, r, c)
 
-        root.addLayout(grid, stretch=1)
+        self._stack.addWidget(cards_widget)
+        root.addWidget(self._stack, stretch=1)
 
+        self._set_view(0)
+
+        # Footer
         ftr = QHBoxLayout()
-        self._summary_lbl = QLabel(f"◈ {len(agents)} RESIDENT AGENTS ONLINE")
+        self._summary_lbl = QLabel(f"◈ {len(agents)} RESIDENT AGENTS ACTIVE")
         self._summary_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
         self._summary_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
         ftr.addWidget(self._summary_lbl)
@@ -3464,12 +3832,63 @@ class AgentTownDrawer(QWidget):
         self._refresh_timer.timeout.connect(self.refresh_all)
         self._refresh_timer.start(2000)
 
+    def _set_view(self, index: int) -> None:
+        self._stack.setCurrentIndex(index)
+        active_style = f"""
+            QPushButton {{
+                background: {C.PRI_GHO}; color: {C.PRI};
+                border: 1px solid {C.PRI}; border-radius: 4px; padding: 0 10px;
+            }}
+        """
+        inactive_style = f"""
+            QPushButton {{
+                background: transparent; color: {C.TEXT_DIM};
+                border: 1px solid {C.BORDER}; border-radius: 4px; padding: 0 10px;
+            }}
+            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+        """
+        if index == 0:
+            self._floor_view_btn.setStyleSheet(active_style)
+            self._cards_view_btn.setStyleSheet(inactive_style)
+        else:
+            self._floor_view_btn.setStyleSheet(inactive_style)
+            self._cards_view_btn.setStyleSheet(active_style)
+
+    def _on_canvas_desk_clicked(self, agent_name: str) -> None:
+        agent = self._mgr.get_agent(agent_name)
+        if not agent:
+            return
+        # If agent has a recent report/result, open their report dialog, otherwise prompt dispatch
+        if agent.latest_result:
+            dlg = AgentReportDialog(agent, self)
+            ow, oh = AgentReportDialog._OW, AgentReportDialog._OH
+            dlg.setGeometry(
+                (self.width() - ow) // 2,
+                (self.height() - oh) // 2,
+                ow, oh
+            )
+            dlg.show()
+            dlg.raise_()
+        else:
+            task, ok = QInputDialog.getText(
+                self,
+                f"Dispatch Task to {agent.name}",
+                f"Instruction for {agent.name} ({agent.role}):",
+                QLineEdit.EchoMode.Normal,
+                ""
+            )
+            if ok and task.strip():
+                self._mgr.dispatch_task(agent.name, task.strip(), async_exec=True)
+                self.refresh_all()
+
     def _on_agent_updated(self, agent: Any) -> None:
         QTimer.singleShot(0, self.refresh_all)
 
     def refresh_all(self) -> None:
         for c in self._cards:
             c.refresh_ui()
+        if hasattr(self, "_canvas"):
+            self._canvas.update()
 
     def toggle(self) -> None:
         if self.isVisible():
@@ -3478,8 +3897,8 @@ class AgentTownDrawer(QWidget):
             self.refresh_all()
             if self.parentWidget():
                 cw = self.parentWidget()
-                ow = min(self._OW, cw.width() - 30)
-                oh = min(self._OH, cw.height() - 30)
+                ow = min(self._OW, cw.width() - 20)
+                oh = min(self._OH, cw.height() - 20)
                 self.setGeometry(
                     (cw.width() - ow) // 2,
                     (cw.height() - oh) // 2,
