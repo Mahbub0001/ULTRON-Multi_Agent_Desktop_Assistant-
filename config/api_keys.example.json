@@ -1,0 +1,11 @@
+{
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
+    "os_system": "windows",
+    "camera_index": 0,
+    "user_name": "Nibir",
+    "android_device_ip": "",
+    "proactive_audio": false,
+    "turn_tuning": {
+        "enabled": false
+    }
+}
