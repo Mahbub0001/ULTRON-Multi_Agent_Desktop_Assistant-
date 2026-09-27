@@ -41,5 +41,16 @@ class TestAgentTownUI(unittest.TestCase):
         drawer = AgentTownDrawer(None)
         self.assertEqual(len(drawer._cards), 4)
 
+    def test_agent_report_dialog(self):
+        from ui import AgentReportDialog
+        from core.agent_town import AgentTownManager
+
+        mgr = AgentTownManager.get_instance()
+        bob = mgr.get_agent("Bob")
+        bob.latest_result = "Test report output"
+        dlg = AgentReportDialog(bob, None)
+        self.assertEqual(dlg._agent.name, "Bob")
+        self.assertIn("Test report output", dlg._text_area.toPlainText())
+
 if __name__ == "__main__":
     unittest.main()

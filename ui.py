@@ -3013,6 +3013,154 @@ class RemoteKeyOverlay(QWidget):
 
 
 # ── Agent Town (Living Office) Widgets ───────────────────────────────────────
+class AgentReportDialog(QWidget):
+    _OW, _OH = 680, 520
+
+    def __init__(self, agent: Any, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._agent = agent
+        self.setObjectName("AgentReportDialog")
+        self.setStyleSheet(f"""
+            QWidget#AgentReportDialog {{
+                background: {C.DARK};
+                border: 2px solid {self._agent.color};
+                border-radius: 8px;
+            }}
+        """)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+
+        # Header
+        hdr = QHBoxLayout()
+        sym_lbl = QLabel(self._agent.avatar_symbol)
+        sym_lbl.setFixedSize(28, 28)
+        sym_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sym_lbl.setStyleSheet(f"""
+            background: {C.PANEL2};
+            border: 1px solid {self._agent.color};
+            border-radius: 14px;
+            font-size: 13px;
+        """)
+        hdr.addWidget(sym_lbl)
+
+        title_box = QVBoxLayout()
+        title_box.setSpacing(1)
+        t_lbl = QLabel(f"◈ {self._agent.name.upper()} // TASK REPORT & AUDIT LOG")
+        t_lbl.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
+        t_lbl.setStyleSheet(f"color: {self._agent.color}; background: transparent;")
+        title_box.addWidget(t_lbl)
+
+        role_lbl = QLabel(self._agent.role)
+        role_lbl.setFont(QFont("Courier New", 7))
+        role_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        title_box.addWidget(role_lbl)
+        hdr.addLayout(title_box)
+
+        hdr.addStretch()
+
+        close_btn = QPushButton("✕  CLOSE")
+        close_btn.setFixedHeight(24)
+        close_btn.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 2px 8px;
+            }}
+            QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI}; }}
+        """)
+        close_btn.clicked.connect(self.hide)
+        hdr.addWidget(close_btn)
+        lay.addLayout(hdr)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {C.BORDER}; margin: 1px 0;")
+        lay.addWidget(sep)
+
+        # Task summary
+        task_lbl = QLabel(f"TASK: {self._agent.current_task or 'None'}")
+        task_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        task_lbl.setWordWrap(True)
+        task_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+        lay.addWidget(task_lbl)
+
+        # Output text area
+        self._text_area = QTextEdit()
+        self._text_area.setReadOnly(True)
+        self._text_area.setFont(QFont("Courier New", 8))
+        self._text_area.setStyleSheet(f"""
+            QTextEdit {{
+                background: {C.PANEL2};
+                color: {C.WHITE};
+                border: 1px solid {C.BORDER};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+        """)
+        content = self._agent.latest_result or "No result generated yet."
+        if getattr(self._agent, "history", None):
+            last_entry = self._agent.history[-1]
+            steps = last_entry.get("steps", [])
+            if steps:
+                step_log = "\n\n--- EXECUTION AUDIT LOG ---\n"
+                for s in steps:
+                    step_log += f"Step {s.get('step')}: {s.get('tool')} ({s.get('thought')})\n"
+                    obs = s.get('observation', '')
+                    if obs:
+                        step_log += f"  ↳ Result: {obs[:200]}\n"
+                content += step_log
+
+        self._text_area.setPlainText(content)
+        lay.addWidget(self._text_area, stretch=1)
+
+        # Bottom buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        copy_btn = QPushButton("📋  COPY TO CLIPBOARD")
+        copy_btn.setFixedHeight(28)
+        copy_btn.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C.PANEL}; color: {C.PRI};
+                border: 1px solid {C.PRI_DIM}; border-radius: 4px; padding: 0 10px;
+            }}
+            QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}
+        """)
+        copy_btn.clicked.connect(self._copy_to_clipboard)
+        btn_row.addWidget(copy_btn)
+
+        folder_btn = QPushButton("📂  OPEN PROJECTS FOLDER")
+        folder_btn.setFixedHeight(28)
+        folder_btn.setFont(QFont("Courier New", 7))
+        folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        folder_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 4px; padding: 0 10px;
+            }}
+            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+        """)
+        folder_btn.clicked.connect(self._open_projects_folder)
+        btn_row.addWidget(folder_btn)
+
+        btn_row.addStretch()
+        lay.addLayout(btn_row)
+
+    def _copy_to_clipboard(self) -> None:
+        QApplication.clipboard().setText(self._text_area.toPlainText())
+
+    def _open_projects_folder(self) -> None:
+        p = Path.home() / "Desktop" / "JarvisProjects"
+        p.mkdir(parents=True, exist_ok=True)
+        if platform.system() == "Windows":
+            os.startfile(str(p))
+        else:
+            subprocess.run(["open" if platform.system() == "Darwin" else "xdg-open", str(p)])
+
+
 class AgentCardWidget(QFrame):
     def __init__(self, agent: Any, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -3030,8 +3178,9 @@ class AgentCardWidget(QFrame):
         """)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10)
-        lay.setSpacing(6)
+        lay.setSpacing(5)
 
+        # Header row
         hdr = QHBoxLayout()
         hdr.setSpacing(8)
 
@@ -3067,12 +3216,14 @@ class AgentCardWidget(QFrame):
         hdr.addWidget(self._status_lbl)
         lay.addLayout(hdr)
 
-        spec_lbl = QLabel(self._agent.specialty)
-        spec_lbl.setFont(QFont("Courier New", 7))
-        spec_lbl.setWordWrap(True)
-        spec_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
-        lay.addWidget(spec_lbl)
+        # Live Micro-status / Ambient Thought Ticker
+        self._thought_lbl = QLabel()
+        self._thought_lbl.setFont(QFont("Courier New", 7))
+        self._thought_lbl.setWordWrap(True)
+        self._thought_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; padding: 1px 0;")
+        lay.addWidget(self._thought_lbl)
 
+        # Task & Result summary box
         self._task_box = QLabel("Awaiting orders...")
         self._task_box.setFont(QFont("Courier New", 7))
         self._task_box.setWordWrap(True)
@@ -3085,9 +3236,11 @@ class AgentCardWidget(QFrame):
         """)
         lay.addWidget(self._task_box, stretch=1)
 
+        # Action Buttons
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        self._action_btn = QPushButton("▸ DISPATCH TASK")
+
+        self._action_btn = QPushButton("▸ DISPATCH")
         self._action_btn.setFixedHeight(24)
         self._action_btn.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
         self._action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3105,6 +3258,27 @@ class AgentCardWidget(QFrame):
         """)
         self._action_btn.clicked.connect(self._prompt_dispatch)
         btn_row.addWidget(self._action_btn)
+
+        self._report_btn = QPushButton("≡ REPORT / LOGS")
+        self._report_btn.setFixedHeight(24)
+        self._report_btn.setFont(QFont("Courier New", 7))
+        self._report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._report_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER};
+                border-radius: 3px;
+                padding: 0 6px;
+            }}
+            QPushButton:hover {{
+                color: {C.PRI};
+                border-color: {C.PRI_DIM};
+            }}
+        """)
+        self._report_btn.clicked.connect(self._open_report)
+        btn_row.addWidget(self._report_btn)
+
         lay.addLayout(btn_row)
 
         self.refresh_ui()
@@ -3116,18 +3290,28 @@ class AgentCardWidget(QFrame):
             st_text = "⚡ WORKING"
             st_col = C.PRI
             st_bg = "#001f2e"
+            status_msg = getattr(self._agent, "status_message", "")
+            self._thought_lbl.setText(f"⚡ {status_msg or 'Processing task...'}")
+            self._thought_lbl.setStyleSheet(f"color: {C.PRI}; font-style: normal;")
         elif state == AgentState.COMPLETED:
             st_text = "✓ DONE"
             st_col = C.GREEN
             st_bg = "#002b15"
+            self._thought_lbl.setText("✓ Task completed. Report ready.")
+            self._thought_lbl.setStyleSheet(f"color: {C.GREEN}; font-style: normal;")
         elif state == AgentState.ERROR:
             st_text = "! ERROR"
             st_col = C.RED
             st_bg = "#2b000a"
+            self._thought_lbl.setText(f"! {getattr(self._agent, 'status_message', 'Execution error')}")
+            self._thought_lbl.setStyleSheet(f"color: {C.RED}; font-style: normal;")
         else:
             st_text = "● IDLE"
             st_col = C.TEXT_DIM
             st_bg = C.PANEL
+            ambient = getattr(self._agent, "get_ambient_thought", lambda: "Ready.")()
+            self._thought_lbl.setText(f"💬 \"{ambient}\"")
+            self._thought_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; font-style: italic;")
 
         self._status_lbl.setText(st_text)
         self._status_lbl.setStyleSheet(f"""
@@ -3150,6 +3334,20 @@ class AgentCardWidget(QFrame):
             self._task_box.setText(text)
         else:
             self._task_box.setText("Ready for assignment.")
+
+    def _open_report(self) -> None:
+        parent_w = self.window()
+        cw = parent_w.centralWidget() if hasattr(parent_w, "centralWidget") else self.parentWidget()
+        dlg = AgentReportDialog(self._agent, cw)
+        ow, oh = AgentReportDialog._OW, AgentReportDialog._OH
+        if cw:
+            dlg.setGeometry(
+                (cw.width() - ow) // 2,
+                (cw.height() - oh) // 2,
+                ow, oh
+            )
+        dlg.show()
+        dlg.raise_()
 
     def _prompt_dispatch(self) -> None:
         task, ok = QInputDialog.getText(
