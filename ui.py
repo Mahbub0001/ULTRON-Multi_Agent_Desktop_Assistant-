@@ -28,9 +28,10 @@ from PyQt6.QtGui import (
     QPen, QPixmap, QRadialGradient, QShortcut,
 )
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QPushButton, QScrollArea, QSizePolicy, QSplitter,
-    QStackedWidget, QTextEdit, QVBoxLayout, QWidget, QProgressBar,
+    QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QInputDialog, QLabel, QLineEdit, QMainWindow, QPushButton, QScrollArea,
+    QSizePolicy, QSplitter, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
+    QProgressBar,
 )
 
 try:
@@ -3011,6 +3012,285 @@ class RemoteKeyOverlay(QWidget):
         self.closed.emit()
 
 
+# ── Agent Town (Living Office) Widgets ───────────────────────────────────────
+class AgentCardWidget(QFrame):
+    def __init__(self, agent: Any, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._agent = agent
+        self.setObjectName("AgentCard")
+        self.setStyleSheet(f"""
+            QFrame#AgentCard {{
+                background: {C.PANEL2};
+                border: 1px solid {C.BORDER};
+                border-radius: 6px;
+            }}
+            QFrame#AgentCard:hover {{
+                border: 1px solid {self._agent.color};
+            }}
+        """)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(6)
+
+        hdr = QHBoxLayout()
+        hdr.setSpacing(8)
+
+        sym_lbl = QLabel(self._agent.avatar_symbol)
+        sym_lbl.setFixedSize(28, 28)
+        sym_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sym_lbl.setStyleSheet(f"""
+            background: {C.DARK};
+            border: 1px solid {self._agent.color};
+            border-radius: 14px;
+            font-size: 13px;
+        """)
+        hdr.addWidget(sym_lbl)
+
+        name_col = QVBoxLayout()
+        name_col.setSpacing(1)
+        name_lbl = QLabel(self._agent.name.upper())
+        name_lbl.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        name_lbl.setStyleSheet(f"color: {self._agent.color}; background: transparent;")
+        name_col.addWidget(name_lbl)
+
+        self._role_lbl = QLabel(self._agent.role)
+        self._role_lbl.setFont(QFont("Courier New", 7))
+        self._role_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        name_col.addWidget(self._role_lbl)
+        hdr.addLayout(name_col)
+
+        hdr.addStretch()
+
+        self._status_lbl = QLabel()
+        self._status_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hdr.addWidget(self._status_lbl)
+        lay.addLayout(hdr)
+
+        spec_lbl = QLabel(self._agent.specialty)
+        spec_lbl.setFont(QFont("Courier New", 7))
+        spec_lbl.setWordWrap(True)
+        spec_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+        lay.addWidget(spec_lbl)
+
+        self._task_box = QLabel("Awaiting orders...")
+        self._task_box.setFont(QFont("Courier New", 7))
+        self._task_box.setWordWrap(True)
+        self._task_box.setStyleSheet(f"""
+            background: {C.DARK};
+            color: {C.TEXT};
+            border: 1px solid {C.BORDER_A};
+            border-radius: 4px;
+            padding: 5px;
+        """)
+        lay.addWidget(self._task_box, stretch=1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+        self._action_btn = QPushButton("▸ DISPATCH TASK")
+        self._action_btn.setFixedHeight(24)
+        self._action_btn.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._action_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {self._agent.color};
+                border: 1px solid {self._agent.color};
+                border-radius: 3px;
+                padding: 0 6px;
+            }}
+            QPushButton:hover {{
+                background: {C.PRI_GHO};
+            }}
+        """)
+        self._action_btn.clicked.connect(self._prompt_dispatch)
+        btn_row.addWidget(self._action_btn)
+        lay.addLayout(btn_row)
+
+        self.refresh_ui()
+
+    def refresh_ui(self) -> None:
+        from core.agent_town import AgentState
+        state = getattr(self._agent, "state", AgentState.IDLE)
+        if state == AgentState.WORKING:
+            st_text = "⚡ WORKING"
+            st_col = C.PRI
+            st_bg = "#001f2e"
+        elif state == AgentState.COMPLETED:
+            st_text = "✓ DONE"
+            st_col = C.GREEN
+            st_bg = "#002b15"
+        elif state == AgentState.ERROR:
+            st_text = "! ERROR"
+            st_col = C.RED
+            st_bg = "#2b000a"
+        else:
+            st_text = "● IDLE"
+            st_col = C.TEXT_DIM
+            st_bg = C.PANEL
+
+        self._status_lbl.setText(st_text)
+        self._status_lbl.setStyleSheet(f"""
+            color: {st_col};
+            background: {st_bg};
+            border: 1px solid {st_col};
+            border-radius: 3px;
+            padding: 2px 5px;
+        """)
+
+        task = getattr(self._agent, "current_task", "")
+        res = getattr(self._agent, "latest_result", "")
+        if task:
+            text = f"TASK: {task}"
+            if res:
+                clean_res = res.strip().replace("\n", " ")
+                if len(clean_res) > 75:
+                    clean_res = clean_res[:72] + "..."
+                text += f"\nRES: {clean_res}"
+            self._task_box.setText(text)
+        else:
+            self._task_box.setText("Ready for assignment.")
+
+    def _prompt_dispatch(self) -> None:
+        task, ok = QInputDialog.getText(
+            self,
+            f"Dispatch Task to {self._agent.name}",
+            f"Instruction for {self._agent.name} ({self._agent.role}):",
+            QLineEdit.EchoMode.Normal,
+            ""
+        )
+        if ok and task.strip():
+            from core.agent_town import AgentTownManager
+            AgentTownManager.get_instance().dispatch_task(self._agent.name, task.strip(), async_exec=True)
+            self.refresh_ui()
+
+
+class AgentTownDrawer(QWidget):
+    _OW, _OH = 780, 520
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setObjectName("AgentTownDrawer")
+        self.setStyleSheet(f"""
+            QWidget#AgentTownDrawer {{
+                background: {C.DARK};
+                border: 1px solid {C.BORDER_B};
+                border-radius: 8px;
+            }}
+        """)
+        self.hide()
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(8)
+
+        # Header
+        hdr = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+
+        t_lbl = QLabel("◈  AGENT TOWN // LIVING OFFICE")
+        t_lbl.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
+        t_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
+        title_box.addWidget(t_lbl)
+
+        sub_lbl = QLabel("Autonomous multi-agent resident team operating inside Mark-LIV")
+        sub_lbl.setFont(QFont("Courier New", 7))
+        sub_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        title_box.addWidget(sub_lbl)
+        hdr.addLayout(title_box)
+
+        hdr.addStretch()
+
+        close_btn = QPushButton("✕  CLOSE")
+        close_btn.setFixedHeight(26)
+        close_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 4px; padding: 2px 8px;
+            }}
+            QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI}; }}
+        """)
+        close_btn.clicked.connect(self.hide)
+        hdr.addWidget(close_btn)
+        root.addLayout(hdr)
+
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        root.addWidget(sep)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        from core.agent_town import AgentTownManager, ResidentAgent
+        self._mgr = AgentTownManager.get_instance()
+        agents = self._mgr.get_all_agents()
+        self._cards: list[AgentCardWidget] = []
+
+        for idx, ag in enumerate(agents):
+            card = AgentCardWidget(ag, self)
+            self._cards.append(card)
+            r = idx // 2
+            c = idx % 2
+            grid.addWidget(card, r, c)
+
+        root.addLayout(grid, stretch=1)
+
+        ftr = QHBoxLayout()
+        self._summary_lbl = QLabel(f"◈ {len(agents)} RESIDENT AGENTS ONLINE")
+        self._summary_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._summary_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+        ftr.addWidget(self._summary_lbl)
+        ftr.addStretch()
+
+        refresh_btn = QPushButton("↻ REFRESH")
+        refresh_btn.setFixedHeight(24)
+        refresh_btn.setFont(QFont("Courier New", 7))
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.PRI_DIM};
+                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 0 6px;
+            }}
+            QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI_DIM}; }}
+        """)
+        refresh_btn.clicked.connect(self.refresh_all)
+        ftr.addWidget(refresh_btn)
+        root.addLayout(ftr)
+
+        self._mgr.register_listener(self._on_agent_updated)
+
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.timeout.connect(self.refresh_all)
+        self._refresh_timer.start(2000)
+
+    def _on_agent_updated(self, agent: Any) -> None:
+        QTimer.singleShot(0, self.refresh_all)
+
+    def refresh_all(self) -> None:
+        for c in self._cards:
+            c.refresh_ui()
+
+    def toggle(self) -> None:
+        if self.isVisible():
+            self.hide()
+        else:
+            self.refresh_all()
+            if self.parentWidget():
+                cw = self.parentWidget()
+                ow = min(self._OW, cw.width() - 30)
+                oh = min(self._OH, cw.height() - 30)
+                self.setGeometry(
+                    (cw.width() - ow) // 2,
+                    (cw.height() - oh) // 2,
+                    ow, oh,
+                )
+            self.show()
+            self.raise_()
+
+
 class MainWindow(QMainWindow):
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
@@ -3068,10 +3348,13 @@ class MainWindow(QMainWindow):
         self._current_file: str | None = None
         self._remote_overlay: RemoteKeyOverlay | None = None
         self._customize_overlay: CustomizeOverlay | None = None
+        self._agent_town_drawer: AgentTownDrawer | None = None
 
         central = QWidget()
         central.setStyleSheet(f"background: {C.BG};")
         self.setCentralWidget(central)
+
+        self._agent_town_drawer = AgentTownDrawer(central)
 
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
@@ -3657,6 +3940,14 @@ class MainWindow(QMainWindow):
                 (cw.height() - oh) // 2,
                 ow, oh,
             )
+        if hasattr(self, '_agent_town_drawer') and self._agent_town_drawer and self._agent_town_drawer.isVisible():
+            ow = min(AgentTownDrawer._OW, cw.width() - 30)
+            oh = min(AgentTownDrawer._OH, cw.height() - 30)
+            self._agent_town_drawer.setGeometry(
+                (cw.width()  - ow) // 2,
+                (cw.height() - oh) // 2,
+                ow, oh,
+            )
         # Camera preview — bottom-right corner of the center/HUD area
         pw = _CameraPreview._W
         ph = self._cam_preview.height() or _CameraPreview._H
@@ -3754,6 +4045,22 @@ class MainWindow(QMainWindow):
         self._drawer_btn.setCheckable(True)
         self._drawer_btn.clicked.connect(self._toggle_drawer)
         lay.addWidget(self._drawer_btn)
+        lay.addSpacing(6)
+
+        self._town_btn = QPushButton("◈ TOWN")
+        self._town_btn.setFixedHeight(26)
+        self._town_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._town_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._town_btn.setToolTip("Agent Town // Living Office")
+        self._town_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.PRI};
+                border: 1px solid {C.PRI_DIM}; border-radius: 4px; padding: 0 8px;
+            }}
+            QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}
+        """)
+        self._town_btn.clicked.connect(self._toggle_agent_town)
+        lay.addWidget(self._town_btn)
         lay.addStretch()
 
         mid = QVBoxLayout(); mid.setSpacing(1)
@@ -3981,6 +4288,14 @@ class MainWindow(QMainWindow):
         remote_btn.clicked.connect(self._open_remote)
         lay.addWidget(remote_btn)
 
+        town_btn = QPushButton("◈  AGENT TOWN")
+        town_btn.setFixedHeight(26)
+        town_btn.setFont(QFont("Courier New", 7))
+        town_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        town_btn.setStyleSheet(_BTN_STYLE_DIM)
+        town_btn.clicked.connect(lambda: (self._quick_drawer.hide(), self._drawer_btn.setChecked(False), self._toggle_agent_town()))
+        lay.addWidget(town_btn)
+
         fs_btn = QPushButton("⛶  FULLSCREEN  [F11]")
         fs_btn.setFixedHeight(26)
         fs_btn.setFont(QFont("Courier New", 7))
@@ -4119,6 +4434,10 @@ class MainWindow(QMainWindow):
             self._quick_drawer.raise_()
         else:
             self._quick_drawer.hide()
+
+    def _toggle_agent_town(self):
+        if hasattr(self, "_agent_town_drawer") and self._agent_town_drawer:
+            self._agent_town_drawer.toggle()
 
     def _position_quick_drawer(self):
         if not hasattr(self, '_quick_drawer'):
