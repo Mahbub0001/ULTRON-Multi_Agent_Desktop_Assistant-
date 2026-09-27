@@ -1,7 +1,9 @@
+import os
 import time
 import subprocess
 import platform
 import shutil
+from pathlib import Path
 
 try:
     import psutil
@@ -77,16 +79,88 @@ def _normalize(raw: str) -> str:
 
     return raw  
 
-def _launch_windows(app_name: str) -> bool:
+def _find_vscode_executable() -> str | None:
+    # 1. Via shutil.which("code")
+    which_code = shutil.which("code")
+    if which_code:
+        p = Path(which_code)
+        cand = p.parent.parent / "Code.exe"
+        if cand.exists():
+            return str(cand)
+        cand_same = p.parent / "Code.exe"
+        if cand_same.exists():
+            return str(cand_same)
+    # 2. Known Windows paths
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if local_app_data:
+        cand = Path(local_app_data) / "Programs" / "Microsoft VS Code" / "Code.exe"
+        if cand.exists():
+            return str(cand)
+    for pf_env in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        pf = os.environ.get(pf_env, "")
+        if pf:
+            cand = Path(pf) / "Microsoft VS Code" / "Code.exe"
+            if cand.exists():
+                return str(cand)
+    return which_code
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
+
+def _launch_windows(app_name: str) -> bool:
+    flags = 0
+    if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+    # Special handling for VS Code
+    low = app_name.lower().strip()
+    if low in ("code", "vscode", "visual studio code"):
+        code_exe = _find_vscode_executable()
+        if code_exe:
+            try:
+                subprocess.Popen(
+                    [code_exe],
+                    creationflags=flags,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                time.sleep(1.5)
+                return True
+            except Exception as e:
+                print(f"[open_app] VS Code launch failed: {e}")
+
+    # Special handling for Notepad
+    if low in ("notepad", "notepad.exe"):
+        notepad_exe = shutil.which("notepad") or str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "notepad.exe")
         try:
             subprocess.Popen(
-                app_name,
-                shell=True,
+                [notepad_exe],
+                creationflags=flags,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            time.sleep(1.0)
+            return True
+        except Exception as e:
+            print(f"[open_app] Notepad launch failed: {e}")
+
+    # Standard executable lookup
+    target_bin = shutil.which(app_name) or shutil.which(app_name.split(".")[0])
+    if target_bin:
+        try:
+            if target_bin.lower().endswith(".exe"):
+                subprocess.Popen(
+                    [target_bin],
+                    creationflags=flags,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                subprocess.Popen(
+                    target_bin,
+                    shell=True,
+                    creationflags=flags,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             time.sleep(1.5)
             return True
         except Exception as e:
@@ -253,7 +327,7 @@ def open_app(
         return f"Unsupported operating system: {_SYSTEM}"
 
     normalized = _normalize(app_name)
-    print(f"[open_app] Request to open: '{app_name}' → '{normalized}' ({_SYSTEM})")
+    print(f"[open_app] Request to open: '{app_name}' -> '{normalized}' ({_SYSTEM})")
 
     if player:
         player.write_log(f"[open_app] {app_name}")

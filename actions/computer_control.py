@@ -272,8 +272,11 @@ def _focus_window(title: str) -> str:
                         matched_hwnd = hwnd
             win32gui.EnumWindows(_enum_cb, None)
             if matched_hwnd:
-                win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
-                win32gui.SetForegroundWindow(matched_hwnd)
+                try:
+                    win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
+                    win32gui.SetForegroundWindow(matched_hwnd)
+                except Exception:
+                    pass
                 time.sleep(0.2)
                 return f"Focused window: {title}"
         except Exception:
@@ -282,14 +285,17 @@ def _focus_window(title: str) -> str:
         # 2. PowerShell AppActivate fallback
         try:
             script = f'(New-Object -ComObject WScript.Shell).AppActivate("{title}")'
-            subprocess.run(
+            proc = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True, timeout=5, **_WIN_HIDE,
+                capture_output=True, timeout=5, text=True, **_WIN_HIDE,
             )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (Windows) failed: {e}"
+            if proc.stdout and proc.stdout.strip().lower() == "true":
+                time.sleep(0.3)
+                return f"Focused window: {title}"
+        except Exception:
+            pass
+
+        return f"Window not found: {title}"
 
     if os_name == "mac":
         script = (
@@ -297,14 +303,16 @@ def _focus_window(title: str) -> str:
             f'set frontmost of (first process whose name contains "{title}") to true'
         )
         try:
-            subprocess.run(
+            res = subprocess.run(
                 ["osascript", "-e", script],
                 capture_output=True, timeout=5,
             )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (macOS) failed: {e}"
+            if res.returncode == 0:
+                time.sleep(0.3)
+                return f"Focused window: {title}"
+        except Exception:
+            pass
+        return f"Window not found: {title}"
 
     if os_name == "linux":
         try:
@@ -322,12 +330,15 @@ def _focus_window(title: str) -> str:
                 ["xdotool", "search", "--name", title, "windowactivate"],
                 capture_output=True, timeout=5,
             )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
+            if result.returncode == 0:
+                time.sleep(0.3)
+                return f"Focused window: {title}"
         except FileNotFoundError:
             return "focus_window (Linux) requires wmctrl or xdotool"
         except Exception as e:
             return f"focus_window (Linux) failed: {e}"
+
+        return f"Window not found: {title}"
 
     return f"focus_window: unknown OS '{os_name}'"
 

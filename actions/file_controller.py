@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import platform
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
@@ -257,6 +258,80 @@ def _resolve_path(raw: str) -> Path:
 
     return Path(raw).expanduser()
 
+
+def _resolve_fuzzy_existing_path(p: Path) -> Path:
+    """If p exists, return it. Otherwise attempt case-insensitive and phonetic
+    match (e.g. Altron vs ultron) on each path component so existing files are found."""
+    if p.exists():
+        return p
+
+    parts = p.parts
+    if not parts:
+        return p
+
+    def _traverse(current: Path, remaining: list[str]) -> Path | None:
+        if not remaining:
+            return current if current.exists() else None
+        part = remaining[0]
+        rest = remaining[1:]
+        exact = current / part
+        if exact.exists():
+            if rest:
+                res = _traverse(exact, rest)
+                if res:
+                    return res
+            else:
+                return exact
+        if current.is_dir():
+            part_low = part.lower()
+            p_target = part_low.replace("altron", "ultron")
+            candidates = []
+            try:
+                for child in current.iterdir():
+                    c_low = child.name.lower()
+                    if c_low == part_low:
+                        candidates.insert(0, child)
+                    elif c_low.replace("altron", "ultron") == p_target:
+                        candidates.append(child)
+                for cand in candidates:
+                    if rest:
+                        res = _traverse(cand, rest)
+                        if res:
+                            return res
+                    else:
+                        return cand
+            except Exception:
+                pass
+        return None
+
+    res = _traverse(Path(parts[0]), list(parts[1:]))
+    return res if res is not None else p
+
+
+def _find_vscode_executable() -> str | None:
+    which_code = shutil.which("code")
+    if which_code:
+        p = Path(which_code)
+        cand = p.parent.parent / "Code.exe"
+        if cand.exists():
+            return str(cand)
+        cand_same = p.parent / "Code.exe"
+        if cand_same.exists():
+            return str(cand_same)
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if local_app_data:
+        cand = Path(local_app_data) / "Programs" / "Microsoft VS Code" / "Code.exe"
+        if cand.exists():
+            return str(cand)
+    for pf_env in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        pf = os.environ.get(pf_env, "")
+        if pf:
+            cand = Path(pf) / "Microsoft VS Code" / "Code.exe"
+            if cand.exists():
+                return str(cand)
+    return which_code
+
+
 def _format_size(b: int) -> str:
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if b < 1024:
@@ -311,12 +386,14 @@ def open_folder(path: str = "desktop", name: str = "") -> str:
     try:
         base = _resolve_path(path)
         target = (base / name) if name else base
+        target = _resolve_fuzzy_existing_path(target)
 
         if not target.exists():
             search_term = name or path
             # Search in common user locations
-            for root in (_get_desktop(), _get_documents(), _get_downloads(), Path("e:/github-projects"), Path.home()):
+            for root in (_get_desktop(), _get_documents(), _get_downloads(), Path("e:/github-projects"), Path("e:/"), Path("d:/"), Path.home()):
                 candidate = root / search_term
+                candidate = _resolve_fuzzy_existing_path(candidate)
                 if candidate.exists() and candidate.is_dir():
                     target = candidate
                     break
@@ -340,12 +417,146 @@ def open_folder(path: str = "desktop", name: str = "") -> str:
         return f"Could not open folder: {e}"
 
 
-def open_file(path: str, name: str = "") -> str:
+def open_file(path: str, name: str = "", with_app: str = "") -> str:
     try:
         base = _resolve_path(path)
         target = (base / name) if name else base
+        target = _resolve_fuzzy_existing_path(target)
+
+        if not target.exists():
+            search_term = name or path
+            for root in (_get_desktop(), _get_documents(), _get_downloads(), Path("e:/github-projects"), Path("e:/"), Path("d:/"), Path.home()):
+                candidate = root / search_term
+                candidate = _resolve_fuzzy_existing_path(candidate)
+                if candidate.exists() and candidate.is_file():
+                    target = candidate
+                    break
+
         if not target.exists():
             return f"File not found: {target.name}"
+
+        app_clean = (with_app or "").strip().lower()
+
+        flags = 0
+        if _OS == "Windows" and hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+        # 1. VS Code
+        if any(k in app_clean for k in ("vscode", "visual studio code", "vs code")) or app_clean == "code":
+            if _OS == "Windows":
+                code_exe = _find_vscode_executable()
+                if code_exe:
+                    subprocess.Popen(
+                        [code_exe, str(target.resolve())],
+                        creationflags=flags,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return f"Opened {target.name} in Visual Studio Code."
+                else:
+                    subprocess.Popen(
+                        f'code "{target.resolve()}"',
+                        shell=True,
+                        creationflags=flags,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return f"Opened {target.name} in Visual Studio Code."
+            elif _OS == "Darwin":
+                subprocess.Popen(["open", "-a", "Visual Studio Code", str(target.resolve())])
+                return f"Opened {target.name} in Visual Studio Code."
+            else:
+                subprocess.Popen(["code", str(target.resolve())])
+                return f"Opened {target.name} in Visual Studio Code."
+
+        # 2. Notepad / text editor
+        if any(k in app_clean for k in ("notepad", "notebook", "text editor", "note pad")):
+            if _OS == "Windows":
+                notepad_exe = shutil.which("notepad") or str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "notepad.exe")
+                subprocess.Popen(
+                    [notepad_exe, str(target.resolve())],
+                    creationflags=flags,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return f"Opened {target.name} in Notepad."
+            elif _OS == "Darwin":
+                subprocess.Popen(["open", "-a", "TextEdit", str(target.resolve())])
+                return f"Opened {target.name} in TextEdit."
+            else:
+                subprocess.Popen(["gedit", str(target.resolve())])
+                return f"Opened {target.name} in Text Editor."
+
+        # 3. Web Browsers (Chrome, Edge, Firefox, Brave)
+        if any(k in app_clean for k in ("chrome", "browser", "edge", "firefox", "brave")):
+            if _OS == "Windows":
+                browser_exe = None
+                if "chrome" in app_clean:
+                    for p in [
+                        Path(os.environ.get("ProgramFiles", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+                        Path(os.environ.get("ProgramFiles(x86)", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+                        Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+                    ]:
+                        if p.exists():
+                            browser_exe = str(p)
+                            break
+                    if not browser_exe:
+                        browser_exe = shutil.which("chrome")
+                elif "edge" in app_clean:
+                    for p in [
+                        Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+                        Path(os.environ.get("ProgramFiles", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+                    ]:
+                        if p.exists():
+                            browser_exe = str(p)
+                            break
+                    if not browser_exe:
+                        browser_exe = shutil.which("msedge")
+
+                if browser_exe:
+                    subprocess.Popen(
+                        [browser_exe, str(target.resolve())],
+                        creationflags=flags,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return f"Opened {target.name} in {with_app}."
+                else:
+                    os.startfile(str(target.resolve()))
+                    return f"Opened {target.name} in default browser."
+            else:
+                import webbrowser
+                webbrowser.open(target.as_uri())
+                return f"Opened {target.name} in browser."
+
+        # 4. Other explicitly specified apps
+        if app_clean:
+            bin_path = shutil.which(app_clean) or shutil.which(f"{app_clean}.exe")
+            if bin_path:
+                if _OS == "Windows":
+                    subprocess.Popen(
+                        [bin_path, str(target.resolve())],
+                        creationflags=flags,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    subprocess.Popen([bin_path, str(target.resolve())])
+                return f"Opened {target.name} in {with_app}."
+            elif _OS == "Windows":
+                try:
+                    subprocess.Popen(
+                        f'start "" "{app_clean}" "{target.resolve()}"',
+                        shell=True,
+                        creationflags=flags,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return f"Opened {target.name} in {with_app}."
+                except Exception:
+                    pass
+
+        # 5. Default opening (associated application)
         if _OS == "Windows":
             os.startfile(str(target.resolve()))
             return f"Opened file: {target.name}"
@@ -810,7 +1021,8 @@ def file_controller(
             return open_folder(path, name=name)
 
         elif action in ("open_file", "launch_file"):
-            return open_file(path, name=name)
+            with_app = params.get("with_app") or params.get("app") or params.get("editor", "")
+            return open_file(path, name=name, with_app=with_app)
 
         elif action == "create_file":
             return create_file(path, name=name, content=params.get("content", ""))
@@ -873,7 +1085,7 @@ def file_controller(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "file_controller",
-    "description": "Manages and opens files and folders: open_folder (opens in Windows File Explorer GUI), open_file, list, create_file, create_folder, delete, move, copy, rename, read, write, find, disk usage.",
+    "description": "Manages and opens files and folders: open_folder (opens in Windows File Explorer GUI), open_file (opens file in default app or specified app like vscode, notepad, chrome), list, create_file, create_folder, delete, move, copy, rename, read, write, find, disk usage.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -884,6 +1096,18 @@ TOOL = {
             "path": {
                 "type": "STRING",
                 "description": "File/folder path or shortcut: desktop, downloads, documents, home"
+            },
+            "name": {
+                "type": "STRING",
+                "description": "File name or search term"
+            },
+            "with_app": {
+                "type": "STRING",
+                "description": "Optional application to open the file with (e.g. 'vscode', 'notepad', 'chrome', 'edge')"
+            },
+            "app": {
+                "type": "STRING",
+                "description": "Alias for with_app"
             },
             "destination": {
                 "type": "STRING",
@@ -896,10 +1120,6 @@ TOOL = {
             "content": {
                 "type": "STRING",
                 "description": "Content for create_file/write"
-            },
-            "name": {
-                "type": "STRING",
-                "description": "File name to search for"
             },
             "extension": {
                 "type": "STRING",
