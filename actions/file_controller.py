@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import platform
 from pathlib import Path
@@ -90,17 +91,78 @@ def _restore_from_trash(original: Path) -> str:
             f"automatically, but it is there and can be restored by hand.")
 
 
-_SAFE_ROOTS: list[Path] = [
-    Path.home(),
-]
+def _get_blocked_system_paths() -> list[Path]:
+    blocked: list[Path] = []
+    if _OS == "Windows":
+        for env_var in ["SystemRoot", "windir"]:
+            val = os.environ.get(env_var)
+            if val:
+                blocked.append(Path(val).resolve())
+        for env_var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]:
+            val = os.environ.get(env_var)
+            if val:
+                blocked.append(Path(val).resolve())
+        for p_str in [r"C:\Windows", r"C:\Program Files", r"C:\Program Files (x86)", r"C:\Recovery", r"C:\Boot"]:
+            try:
+                p = Path(p_str)
+                if p.exists():
+                    blocked.append(p.resolve())
+            except Exception:
+                pass
+    elif _OS == "Darwin":
+        for p_str in ["/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/private"]:
+            try:
+                blocked.append(Path(p_str).resolve())
+            except Exception:
+                pass
+    else:  # Linux
+        for p_str in ["/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root", "/run", "/sbin", "/sys", "/usr"]:
+            try:
+                blocked.append(Path(p_str).resolve())
+            except Exception:
+                pass
+    return blocked
+
 
 def _is_safe_path(target: Path) -> bool:
-    """Is the given path inside _SAFE_ROOTS? If not, reject the operation."""
+    """True if target is safe for user operations and not a protected OS directory."""
     try:
         resolved = target.resolve()
+
+        # Reject Windows System Volume Information and Recycle Bin on any drive
+        parts_lower = [p.lower() for p in resolved.parts]
+        for part in parts_lower:
+            if "system volume information" in part or "$recycle.bin" in part:
+                return False
+
+        # Reject if target IS or IS INSIDE any protected OS system directory
+        for b in _get_blocked_system_paths():
+            try:
+                if resolved == b or resolved.is_relative_to(b):
+                    return False
+            except Exception:
+                continue
+
+        if _OS == "Windows":
+            # On Windows, all valid system drives (C:, D:, E:, etc.) are available for user files.
+            drive = resolved.drive
+            if not drive:
+                return False
+            drive_root = Path(f"{drive}\\")
+            if not drive_root.exists():
+                return False
+            return True
+
+        # Non-Windows (macOS, Linux):
+        allowed_roots = [
+            Path.home().resolve(),
+            Path("/Volumes").resolve(),
+            Path("/media").resolve(),
+            Path("/mnt").resolve(),
+        ]
         return any(
-            resolved == root.resolve() or resolved.is_relative_to(root.resolve())
-            for root in _SAFE_ROOTS
+            (resolved == r or resolved.is_relative_to(r))
+            for r in allowed_roots if r.exists()
         )
     except Exception:
         return False
@@ -158,21 +220,40 @@ def _resolve_path(raw: str) -> Path:
         "videos":    _get_videos(),
         "home":      Path.home(),
     }
-    raw   = raw.strip().strip('"').strip("'")
+    raw = (raw or "").strip().strip('"').strip("'")
+    if not raw:
+        return Path.home()
+
     lower = raw.lower()
     if lower in shortcuts:
         return shortcuts[lower]
 
     # "desktop/notes/a.md" and "desktop\notes\a.md" — a shortcut followed by a
-    # sub-path.  Without this branch the whole string falls through to the
-    # relative-path return below and is resolved against the process CWD instead
-    # of the real Desktop: an "Access denied" when the project lives outside the
-    # home directory, or — worse — a silent write into a stray "desktop" folder
-    # inside the project when it lives inside it.
+    # sub-path.
     head, sep, rest = raw.replace("\\", "/").partition("/")
     if sep and head.lower() in shortcuts:
         rest = rest.strip("/")
         return shortcuts[head.lower()] / rest if rest else shortcuts[head.lower()]
+
+    if _OS == "Windows":
+        # Handle "E drive", "e drive", "e-drive", "E disk", etc.
+        m = re.match(r"^([a-zA-Z])(?:\s*|-)(?:drive|disk)[\/\\]?(.*)$", raw, re.IGNORECASE)
+        if m:
+            dl = m.group(1).upper()
+            sub = m.group(2).lstrip(r"\/")
+            return Path(f"{dl}:\\{sub}") if sub else Path(f"{dl}:\\")
+
+        # Handle "E:" or "e:" -> root of drive "E:\"
+        if re.match(r"^[a-zA-Z]:$", raw):
+            return Path(f"{raw[0].upper()}:\\")
+
+        # Handle "E:something" without slash -> "E:\something"
+        if re.match(r"^[a-zA-Z]:[^\/\\]", raw):
+            return Path(f"{raw[:2]}\\{raw[2:]}")
+
+        # Handle single letter "E" or "e" if that drive exists
+        if re.match(r"^[a-zA-Z]$", raw) and Path(f"{raw.upper()}:\\").exists():
+            return Path(f"{raw.upper()}:\\")
 
     return Path(raw).expanduser()
 
@@ -280,8 +361,12 @@ def open_file(path: str, name: str = "") -> str:
 
 def create_file(path: str, name: str = "", content: str = "") -> str:
     try:
+        if name:
+            name = re.sub(r"[\s_]+(?:নামে|নামায়|নামক|ফাইল)$", "", name.strip(), flags=re.IGNORECASE)
         base   = _resolve_path(path)
         target = (base / name) if name else base
+        if name and base.name.lower() == name.lower():
+            target = base
         if not _is_safe_path(target):
             return f"Access denied: {target}"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -295,15 +380,19 @@ def create_file(path: str, name: str = "", content: str = "") -> str:
         target.write_text(content, encoding="utf-8")
         push_undo(f"created {target.name}",
                   _undo_write(target, previous) if existed else _undo_create(target))
-        return f"File created: {target.name}"
+        return f"File created: {target}"
     except Exception as e:
         return f"Could not create file: {e}"
 
 
 def create_folder(path: str, name: str = "") -> str:
     try:
+        if name:
+            name = re.sub(r"[\s_]+(?:নামে|নামায়|নামক|ফোল্ডার)$", "", name.strip(), flags=re.IGNORECASE)
         base   = _resolve_path(path)
         target = (base / name) if name else base
+        if name and base.name.lower() == name.lower():
+            target = base
         if not _is_safe_path(target):
             return f"Access denied: {target}"
         already = target.exists()
@@ -313,7 +402,7 @@ def create_folder(path: str, name: str = "") -> str:
         # directory the user has had for years.
         if not already:
             push_undo(f"created folder {target.name}", _undo_create(target))
-        return f"Folder created: {target.name}"
+        return f"Folder created: {target}"
     except Exception as e:
         return f"Could not create folder: {e}"
 
@@ -327,7 +416,9 @@ def delete_file(path: str, name: str = "") -> str:
         if not target.exists():
             return f"Not found: {target.name}"
 
-        # Safe-directory check — protect critical user folders
+        # Safe-directory check — protect critical user folders and drive roots
+        if target.resolve() == Path(target.anchor).resolve():
+            return f"Protected drive root, cannot delete: {target}"
         protected = {
             _get_desktop(), _get_downloads(), _get_documents(),
             _get_pictures(), _get_music(), _get_videos(), Path.home()
