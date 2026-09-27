@@ -151,6 +151,25 @@ _DEFAULT_AGENTS: list[dict[str, Any]] = [
 ]
 
 
+
+def _clean_agent_path(raw_path: str) -> Path:
+    raw = (raw_path or "").strip().replace("\\", "/").strip('"').strip("'")
+    if not raw:
+        return Path.home() / "Desktop" / "JarvisProjects"
+    p = Path(raw).expanduser()
+    if p.is_absolute():
+        return p
+    parts = [part.lower() for part in p.parts]
+    if "jarvisprojects" in parts:
+        idx = parts.index("jarvisprojects")
+        rel_sub = Path(*p.parts[idx+1:])
+        return Path.home() / "Desktop" / "JarvisProjects" / rel_sub
+    if parts and parts[0] == "desktop":
+        rel_sub = Path(*p.parts[1:])
+        return Path.home() / "Desktop" / rel_sub
+    return Path.home() / "Desktop" / "JarvisProjects" / p
+
+
 class AgentTownManager:
     _instance: Optional[AgentTownManager] = None
     _lock = threading.Lock()
@@ -279,10 +298,7 @@ class AgentTownManager:
                 content = str(args.get("content", ""))
                 if not raw_path:
                     return "Error: File path is required."
-                target = Path(raw_path).expanduser()
-                if not target.is_absolute():
-                    # Default relative writes to Desktop/JarvisProjects
-                    target = Path.home() / "Desktop" / "JarvisProjects" / target
+                target = _clean_agent_path(raw_path)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
                 return f"Successfully wrote {len(content)} characters to {target.resolve()}."
@@ -291,9 +307,7 @@ class AgentTownManager:
                 raw_path = str(args.get("path", "")).strip()
                 if not raw_path:
                     return "Error: File path is required."
-                target = Path(raw_path).expanduser()
-                if not target.is_absolute():
-                    target = Path.home() / "Desktop" / "JarvisProjects" / target
+                target = _clean_agent_path(raw_path)
                 if not target.is_file():
                     return f"Error: File '{target}' does not exist."
                 content = target.read_text(encoding="utf-8", errors="replace")
@@ -334,14 +348,20 @@ class AgentTownManager:
             elif t_name == "create_word_document":
                 title = str(args.get("title", "Document")).strip()
                 content = str(args.get("content", "")).strip()
-                path = str(args.get("path", "Desktop/Report.docx")).strip()
+                raw_p = str(args.get("path", "")).strip()
+                if not raw_p:
+                    safe_t = re.sub(r'[\\/*?:"<>|]', '', title or "Report")[:40].strip().replace(" ", "_")
+                    target = Path.home() / "Desktop" / f"{safe_t}.docx"
+                else:
+                    target = _clean_agent_path(raw_p)
+                    if target.suffix.lower() != ".docx":
+                        target = target.with_suffix(".docx")
                 try:
                     from actions import word_document
                     return word_document.word_document(
-                        {"action": "create", "title": title, "content": content, "path": path}
+                        {"action": "create", "title": title, "content": content, "path": str(target)}
                     )
                 except Exception as e:
-                    # Fallback: save as markdown file
                     md_path = Path.home() / "Desktop" / f"{title.replace(' ', '_')}.md"
                     md_path.write_text(f"# {title}\n\n{content}", encoding="utf-8")
                     return f"Document formatted and saved to {md_path}."
