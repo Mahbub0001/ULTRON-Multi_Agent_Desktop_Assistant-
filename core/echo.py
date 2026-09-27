@@ -59,7 +59,7 @@ import numpy as np
 _BAND_EDGES = (200, 400, 700, 1100, 1700, 2600, 3800, 5200, 7000)
 
 _HISTORY_S = 1.5      # how far back an echo could plausibly have been played
-_MIN_LEVEL = 0.06     # below this the mic is room noise; nothing to decide
+_MIN_LEVEL = 0.02     # below this the mic is room noise; lowered from 0.06 to capture natural conversational speech
 
 # The threshold is not a tuned constant. It is placed just above essentially ALL
 # the echo this particular room has been seen to produce. Residuals measured on
@@ -75,7 +75,7 @@ _MIN_LEVEL = 0.06     # below this the mic is room noise; nothing to decide
 # quiet setup even a voice whose formants sit close to ours stands clear of the
 # echo, and in a bad one nothing reliably does. The right response to the last
 # row is to say so — not to interrupt at random.
-_MIN_USER = 0.15      # never call anything below this a voice
+_MIN_USER = 0.05      # never call anything below this a voice; tuned for built-in laptop mics
 _HEAD_Q = 97          # percentile of observed echo the threshold must clear
 _HEAD_MULT = 1.15     # ...with this much headroom above it
 

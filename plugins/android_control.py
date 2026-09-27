@@ -359,7 +359,7 @@ def _handle_close_app(target: str, app_name: str) -> str:
     return f"Closed {app_name} on your phone, sir."
 
 
-def _handle_type_text(target: str, text: str) -> str:
+def _handle_type_text(target: str, text: str, press_enter: bool = False) -> str:
     if not text:
         return "No text provided to type, sir."
 
@@ -380,8 +380,103 @@ def _handle_type_text(target: str, text: str) -> str:
     if rc != 0:
         return f"Failed to type on phone: {stderr}"
 
+    if press_enter:
+        time.sleep(0.5)
+        _run_adb(["-s", target, "shell", "input", "keyevent", "66"])
+
     time.sleep(1.5)  # Delay for typing / keyboard animation
+    if press_enter:
+        return f"Typed '{text}' and pressed Enter on your phone, sir."
     return f"Typed on phone: '{text}', sir."
+
+
+def _handle_press_key(target: str, key: str) -> str:
+    key_clean = key.lower().strip()
+    if not key_clean:
+        return "Please specify which key to press on your phone, sir."
+
+    key_map = {
+        "enter": "66",       # KEYCODE_ENTER
+        "return": "66",
+        "search": "84",      # KEYCODE_SEARCH
+        "back": "4",         # KEYCODE_BACK
+        "home": "3",         # KEYCODE_HOME
+        "recent": "187",     # KEYCODE_APP_SWITCH
+        "recents": "187",
+        "app_switch": "187",
+        "tab": "61",         # KEYCODE_TAB
+        "space": "62",       # KEYCODE_SPACE
+        "delete": "67",      # KEYCODE_DEL
+        "backspace": "67",
+        "power": "26",       # KEYCODE_POWER
+        "wake": "224",       # KEYCODE_WAKEUP
+        "sleep": "223",      # KEYCODE_SLEEP
+        "volume_up": "24",
+        "volume_down": "25",
+        "mute": "164",
+    }
+
+    code = key_map.get(key_clean, key_clean)
+    rc, stdout, stderr = _run_adb(["-s", target, "shell", "input", "keyevent", str(code)])
+    combined = (str(stdout) + " " + str(stderr)).lower()
+    if "securityexception" in combined or "inject_events" in combined:
+        return "Permission needed: Please enable 'USB debugging (Security settings)' in Developer Options on your phone, sir."
+    if rc != 0:
+        return f"Failed to press key '{key}' on phone: {stderr}"
+
+    time.sleep(1.0)
+    return f"Pressed '{key}' on your phone, sir."
+
+
+def _handle_search_youtube(target: str, query: str) -> str:
+    query_clean = query.strip()
+    if not query_clean:
+        return "Please specify what to search on YouTube, sir."
+
+    encoded_query = urllib.parse.quote(query_clean)
+    yt_url = f"https://www.youtube.com/results?search_query={encoded_query}"
+
+    # Open YouTube directly to search results using Android Intent
+    rc, stdout, stderr = _run_adb([
+        "-s", target, "shell", "am", "start",
+        "-a", "android.intent.action.VIEW",
+        "-d", f"'{yt_url}'",
+        "-p", "com.google.android.youtube"
+    ])
+    if rc != 0 or "Error" in stdout:
+        rc2, stdout2, stderr2 = _run_adb([
+            "-s", target, "shell", "am", "start",
+            "-a", "android.intent.action.VIEW",
+            "-d", f"'{yt_url}'"
+        ])
+        if rc2 != 0:
+            return f"Failed to search YouTube on phone: {stderr2 or stderr}"
+
+    time.sleep(2.0)
+    return f"Searched for '{query_clean}' on your phone's YouTube, sir."
+
+
+def _handle_search(target: str, query: str, app: str = "youtube") -> str:
+    query_clean = query.strip()
+    if not query_clean:
+        return "Please specify what to search on your phone, sir."
+
+    app_clean = (app or "youtube").lower().strip()
+    if "youtube" in app_clean:
+        return _handle_search_youtube(target, query_clean)
+
+    encoded_query = urllib.parse.quote(query_clean)
+    search_url = f"https://www.google.com/search?q={encoded_query}"
+    rc, stdout, stderr = _run_adb([
+        "-s", target, "shell", "am", "start",
+        "-a", "android.intent.action.VIEW",
+        "-d", f"'{search_url}'"
+    ])
+    if rc != 0:
+        return f"Failed to search on phone: {stderr}"
+
+    time.sleep(2.0)
+    return f"Searched for '{query_clean}' on your phone, sir."
 
 
 def _handle_tap_element(target: str, description: str) -> str:
@@ -568,13 +663,14 @@ PLUGIN = {
     "name": "android_control",
     "description": (
         "Controls the user's PHONE over ADB (not the PC). Use whenever the user asks to control "
-        "their mobile/phone device or send WhatsApp messages via phone (e.g., 'phone e WhatsApp e message pathao', "
+        "their mobile/phone device, search YouTube on phone, or send WhatsApp messages via phone (e.g., 'phone e YouTube e search koro', "
+        "'phone er YouTube e Langchain likhe search dao', 'phone e WhatsApp e message pathao', "
         "'Mamuni ke WhatsApp e message pathao', 'phone e type koro', 'phone er app close koro', "
-        "'phone e YouTube kholo', 'phone er volume', 'phone e tap koro', 'phone er screenshot', 'phone er battery'). "
+        "'phone e YouTube kholo', 'phone er volume', 'phone e tap koro', 'phone e enter chapo', 'phone er screenshot', 'phone er battery'). "
         "For PC/desktop operations, use desktop tools instead. "
-        "Actions: phone_open_app | phone_close_app | phone_send_whatsapp_message | phone_type_text | "
-        "phone_tap_element | phone_volume_up | phone_volume_down | phone_mute | phone_screenshot | "
-        "phone_lock_screen | phone_battery_status | phone_list_devices."
+        "Actions: phone_search_youtube | phone_search | phone_press_key | phone_open_app | phone_close_app | "
+        "phone_send_whatsapp_message | phone_type_text | phone_tap_element | phone_volume_up | "
+        "phone_volume_down | phone_mute | phone_screenshot | phone_lock_screen | phone_battery_status | phone_list_devices."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -583,17 +679,33 @@ PLUGIN = {
                 "type": "STRING",
                 "description": (
                     "The exact phone action to perform. Pick one of: "
+                    "phone_search_youtube | phone_search | phone_press_key | "
                     "phone_open_app | phone_close_app | phone_send_whatsapp_message | "
                     "phone_type_text | phone_tap_element | phone_volume_up | "
                     "phone_volume_down | phone_mute | phone_screenshot | "
                     "phone_lock_screen | phone_battery_status | phone_list_devices"
                 ),
             },
+            "query": {
+                "type": "STRING",
+                "description": "Search query text. Used with phone_search_youtube and phone_search (e.g. 'Langchain', 'Python tutorial').",
+            },
+            "key": {
+                "type": "STRING",
+                "description": (
+                    "Key name to press on the phone: 'enter', 'search', 'back', 'home', 'recent', "
+                    "'tab', 'space', 'delete', 'power'. Used with phone_press_key."
+                ),
+            },
+            "press_enter": {
+                "type": "BOOLEAN",
+                "description": "Whether to press Enter key immediately after typing text. Default is false. Used with phone_type_text.",
+            },
             "app_name": {
                 "type": "STRING",
                 "description": (
-                    "App name to launch or close on the phone (e.g. 'whatsapp', 'youtube', 'chrome', 'camera', 'gallery', 'settings'). "
-                    "Used with phone_open_app and phone_close_app."
+                    "App name to launch, close, or search in on the phone (e.g. 'whatsapp', 'youtube', 'chrome', 'camera', 'gallery', 'settings'). "
+                    "Used with phone_open_app, phone_close_app, and phone_search."
                 ),
             },
             "contact": {
@@ -648,6 +760,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     # Normalize action: accept both phone_<action> and legacy <action>
     action = raw_action
     if not action.startswith("phone_") and f"phone_{action}" in (
+        "phone_search_youtube", "phone_search", "phone_press_key",
         "phone_open_app", "phone_close_app", "phone_send_whatsapp_message",
         "phone_type_text", "phone_tap_element", "phone_volume_up",
         "phone_volume_down", "phone_mute", "phone_screenshot",
@@ -680,7 +793,20 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         return conn_err
 
     try:
-        if action == "phone_open_app":
+        if action == "phone_search_youtube":
+            query = params.get("query") or params.get("text") or ""
+            return _handle_search_youtube(target, query)
+
+        elif action == "phone_search":
+            query = params.get("query") or params.get("text") or ""
+            app = params.get("app_name") or params.get("app") or "youtube"
+            return _handle_search(target, query, app)
+
+        elif action == "phone_press_key":
+            key = params.get("key") or params.get("key_name") or params.get("button") or "enter"
+            return _handle_press_key(target, key)
+
+        elif action == "phone_open_app":
             app_name = params.get("app_name") or params.get("name") or ""
             return _handle_open_app(target, app_name)
 
@@ -695,7 +821,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
 
         elif action == "phone_type_text":
             text_to_type = params.get("text") or params.get("query") or ""
-            return _handle_type_text(target, text_to_type)
+            press_enter = bool(params.get("press_enter", False) or params.get("enter", False))
+            return _handle_type_text(target, text_to_type, press_enter=press_enter)
 
         elif action == "phone_tap_element":
             element_desc = params.get("description") or params.get("element") or params.get("target") or ""
@@ -722,7 +849,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         else:
             return (
                 f"Unknown Android action: '{raw_action}'. "
-                "Available: phone_open_app, phone_close_app, phone_send_whatsapp_message, "
+                "Available: phone_search_youtube, phone_search, phone_press_key, "
+                "phone_open_app, phone_close_app, phone_send_whatsapp_message, "
                 "phone_type_text, phone_tap_element, phone_volume_up, phone_volume_down, "
                 "phone_mute, phone_screenshot, phone_lock_screen, phone_battery_status, phone_list_devices."
             )
