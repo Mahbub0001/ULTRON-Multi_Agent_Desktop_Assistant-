@@ -847,27 +847,25 @@ class JarvisLive:
 
     def _tail_active(self) -> bool:
         """True while the speakers may still be finishing our last sentence."""
-        return time.monotonic() < self._tail_until
+        return time.monotonic() < self._tail_until and bool(self._echo._hist)
 
-    def set_speaking(self, value: bool):
+    def set_speaking(self, value: bool, reset_tail: bool = False):
         with self._speaking_lock:
+            was_speaking = self._is_speaking
             self._is_speaking = value
-        if value:
+        if value or reset_tail:
             self._tail_until = 0.0
-        else:
+        elif was_speaking:
             # Hold the guard open across the device's own output latency plus a
-            # margin for the room. The microphone is NOT muted during it — the
-            # guard still lets a genuine reply through, so answering instantly
-            # still works. Only our own echo is dropped.
+            # margin for the room. Only schedule tail if we were actually speaking.
             self._tail_until = time.monotonic() + self._out_latency + _TAIL_MARGIN
+        else:
+            self._tail_until = 0.0
         if not value:
-            # The echo history is deliberately NOT cleared here: the tail above
-            # still needs it to recognise our own voice. It is dropped when the
-            # tail expires. What the guard learned about the room always stays.
             self._out_level = 0.0
         if value:
             self.ui.set_state("SPEAKING")
-        elif not self.ui.muted:
+        elif not self.ui.muted and getattr(self, "_awake", True):
             self.ui.set_state("LISTENING")
 
     def set_push_to_talk(self, enabled: bool) -> str:
@@ -1371,13 +1369,16 @@ class JarvisLive:
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
                 def _enqueue():
-                    if self.out_queue.full():
+                    q = self.out_queue
+                    if q is None:
+                        return
+                    if q.full():
                         try:
-                            self.out_queue.get_nowait()
+                            q.get_nowait()
                         except Exception:
                             pass
                     try:
-                        self.out_queue.put_nowait({"data": data, "mime_type": "audio/pcm"})
+                        q.put_nowait({"data": data, "mime_type": "audio/pcm"})
                     except Exception:
                         pass
                 loop.call_soon_threadsafe(_enqueue)
@@ -1486,7 +1487,9 @@ class JarvisLive:
 
         try:
             while True:
+                had_response = False
                 async for response in self.session.receive():
+                    had_response = True
 
                     # ── Session resumption ───────────────────────────────────
                     # The server sends this periodically. `resumable` goes false
@@ -1612,8 +1615,9 @@ class JarvisLive:
                         if self.audio_in_queue and self.audio_in_queue.empty():
                             self.set_speaking(False)
 
-                print("[ULTRON] ⚠️  Session receive stream closed by server.")
-                raise RuntimeError("Gemini Live session stream ended.")
+                if not had_response:
+                    print("[ULTRON] ⚠️  Session receive stream closed by server.")
+                    raise RuntimeError("Gemini Live session stream ended.")
         except Exception as e:
             print(f"[ULTRON] ❌ Recv: {e}")
             traceback.print_exc()
@@ -2063,6 +2067,8 @@ class JarvisLive:
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
+                    self.set_speaking(False, reset_tail=True)
+                    self._echo.reset()
 
                     print("[ULTRON] Connected.")
                     if _resumed_with:
