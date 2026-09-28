@@ -887,7 +887,47 @@ def computer_control(
             return f"{coords[0]},{coords[1]}" if coords else "NOT_FOUND"
 
         if action == "screen_click":
-            desc   = params.get("description", "")
+            desc = params.get("description", "")
+            d_lower = desc.lower()
+            cur_title = _active_window().lower()
+
+            # Smart web-app direct navigation interception:
+            # If user or model is trying to click navigation buttons/bell on LinkedIn or GitHub,
+            # navigate directly to the URL in the active tab instead of risking missed clicks.
+            if "linkedin" in cur_title or "linkedin" in d_lower:
+                if "notification" in d_lower:
+                    try:
+                        from actions.browser_control import browser_control
+                        return browser_control({"action": "go_to", "url": "https://www.linkedin.com/notifications"}, player=player)
+                    except Exception:
+                        pass
+                if any(k in d_lower for k in ["message", "messaging", "inbox"]):
+                    try:
+                        from actions.browser_control import browser_control
+                        return browser_control({"action": "go_to", "url": "https://www.linkedin.com/messaging"}, player=player)
+                    except Exception:
+                        pass
+                if any(k in d_lower for k in ["network", "connection", "mynetwork"]):
+                    try:
+                        from actions.browser_control import browser_control
+                        return browser_control({"action": "go_to", "url": "https://www.linkedin.com/mynetwork"}, player=player)
+                    except Exception:
+                        pass
+                if any(k in d_lower for k in ["feed", "home"]):
+                    try:
+                        from actions.browser_control import browser_control
+                        return browser_control({"action": "go_to", "url": "https://www.linkedin.com/feed"}, player=player)
+                    except Exception:
+                        pass
+
+            if "github" in cur_title or "github" in d_lower:
+                if "notification" in d_lower:
+                    try:
+                        from actions.browser_control import browser_control
+                        return browser_control({"action": "go_to", "url": "https://github.com/notifications"}, player=player)
+                    except Exception:
+                        pass
+
             coords = _screen_find(desc)
             if coords:
                 time.sleep(0.2)

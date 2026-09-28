@@ -32,11 +32,45 @@ def _normalize_url(url: str) -> str:
     """
     Bare words like "instagram" → "https://instagram.com"
     Domains like "instagram.com" → "https://instagram.com"
+    Web app shortcuts like "linkedin notifications" -> "https://www.linkedin.com/notifications"
     Full URLs pass through unchanged.
     """
     url = url.strip()
     if not url:
         return "about:blank"
+    
+    u_lower = url.lower()
+    # Map common web app shorthand
+    if "linkedin" in u_lower:
+        if "notification" in u_lower:
+            return "https://www.linkedin.com/notifications"
+        if any(k in u_lower for k in ["message", "messaging", "inbox", "chat"]):
+            return "https://www.linkedin.com/messaging"
+        if any(k in u_lower for k in ["network", "connection", "mynetwork"]):
+            return "https://www.linkedin.com/mynetwork"
+        if "job" in u_lower:
+            return "https://www.linkedin.com/jobs"
+        if "feed" in u_lower or "home" in u_lower:
+            return "https://www.linkedin.com/feed"
+        if url in ("linkedin", "linkedin.com", "www.linkedin.com"):
+            return "https://www.linkedin.com"
+
+    if "github" in u_lower:
+        if "notification" in u_lower:
+            return "https://github.com/notifications"
+        if "profile" in u_lower or "my profile" in u_lower:
+            return "https://github.com/Mahbub0001"
+        if "pull" in u_lower or " pr" in u_lower or "/pr" in u_lower or u_lower.endswith("pr"):
+            return "https://github.com/pulls"
+        if "issue" in u_lower:
+            return "https://github.com/issues"
+
+    if "youtube" in u_lower:
+        if "subscription" in u_lower:
+            return "https://www.youtube.com/feed/subscriptions"
+        if "history" in u_lower:
+            return "https://www.youtube.com/feed/history"
+
     if "://" in url:
         return url
     # No dot at all → assume .com  (e.g. "instagram" → "instagram.com")
@@ -1116,10 +1150,47 @@ def browser_control(
     if not _registry.has(browser):
         # 1. Profile / direct navigation check
         desc = (params.get("description") or params.get("text") or params.get("selector") or "").lower().strip()
-        if ("profile" in desc or "my profile" in desc or "account" in desc) and action in ("click", "smart_click"):
-            last_url = (_registry._last_native_url or "").lower()
-            if "github" in last_url or not last_url:
-                return browser_control({"action": "go_to", "url": "https://github.com/Mahbub0001"}, player=player)
+        last_url = (_registry._last_native_url or "").lower()
+        cur_title = ""
+        try:
+            from actions.computer_control import _active_window
+            cur_title = _active_window().lower()
+        except Exception:
+            pass
+
+        # Smart web-app direct navigation interception for clicks
+        is_linkedin = "linkedin" in cur_title or "linkedin" in last_url or "linkedin" in desc
+        is_github = "github" in cur_title or "github" in last_url or "github" in desc
+        is_youtube = "youtube" in cur_title or "youtube" in last_url or "youtube" in desc
+
+        if action in ("click", "smart_click"):
+            if is_linkedin:
+                if "notification" in desc:
+                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/notifications"}, player=player)
+                if any(k in desc for k in ["message", "messaging", "inbox", "chat"]):
+                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/messaging"}, player=player)
+                if any(k in desc for k in ["network", "connection", "mynetwork"]):
+                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/mynetwork"}, player=player)
+                if any(k in desc for k in ["job", "jobs"]):
+                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/jobs"}, player=player)
+                if any(k in desc for k in ["feed", "home"]):
+                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/feed"}, player=player)
+
+            if is_github:
+                if "notification" in desc:
+                    return browser_control({"action": "go_to", "url": "https://github.com/notifications"}, player=player)
+                if "profile" in desc or "my profile" in desc:
+                    return browser_control({"action": "go_to", "url": "https://github.com/Mahbub0001"}, player=player)
+
+            if is_youtube:
+                if "subscription" in desc:
+                    return browser_control({"action": "go_to", "url": "https://www.youtube.com/feed/subscriptions"}, player=player)
+                if "history" in desc:
+                    return browser_control({"action": "go_to", "url": "https://www.youtube.com/feed/history"}, player=player)
+
+            if ("profile" in desc or "my profile" in desc or "account" in desc):
+                if "github" in last_url or not last_url:
+                    return browser_control({"action": "go_to", "url": "https://github.com/Mahbub0001"}, player=player)
 
         # 2. Native click / smart_click on active screen
         if action in ("click", "smart_click"):
