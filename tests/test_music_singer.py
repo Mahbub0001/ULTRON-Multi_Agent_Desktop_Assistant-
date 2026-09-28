@@ -42,5 +42,18 @@ class TestMusicSingerPlayer(unittest.TestCase):
         self.assertIn("paused", status)
         self.assertEqual(status["volume"], 80)
 
+    @patch("actions.music_singer.requests.get")
+    def test_generate_ai_song_success(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b"ID3\x03fake_mp3_data"
+        mock_get.return_value = mock_response
+
+        from actions.music_singer import generate_ai_song
+        success, path, msg = generate_ai_song("cheerful birthday tune", "Happy birthday to you")
+        self.assertTrue(success)
+        self.assertTrue(Path(path).exists())
+
 if __name__ == "__main__":
+
     unittest.main()

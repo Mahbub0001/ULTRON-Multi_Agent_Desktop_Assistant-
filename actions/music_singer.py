@@ -129,3 +129,33 @@ class NativeAudioPlayer:
             "current_title": self.current_title,
             "volume": self.wmp.settings.volume if self.wmp else 0
         }
+
+
+def generate_ai_song(query: str, lyrics: str = "") -> tuple[bool, str, str]:
+    """Generates an AI audio track using free cloud inference and caches it locally."""
+    clean_prompt = query.strip()
+    if lyrics.strip():
+        clean_prompt = f"{clean_prompt}. Lyrics: {lyrics.strip()[:200]}"
+    
+    encoded_prompt = urllib.parse.quote(clean_prompt[:250])
+    # 100% free cloud audio generation endpoint
+    url = f"https://text.pollinations.ai/{encoded_prompt}?model=audio"
+    
+    cache_filename = f"ai_song_{abs(hash(clean_prompt)) % 1000000}.mp3"
+    target_file = MUSIC_CACHE_DIR / cache_filename
+    
+    if target_file.exists() and target_file.stat().st_size > 0:
+        return True, str(target_file), f"Playing cached AI song: {query}"
+        
+    try:
+        if not _HAS_REQUESTS:
+            return False, "", "Requests module unavailable"
+        resp = requests.get(url, timeout=35)
+        if resp.status_code == 200 and len(resp.content) > 0:
+            target_file.write_bytes(resp.content)
+            return True, str(target_file), f"Generated and playing AI song for: '{query}'"
+    except Exception as e:
+        print(f"[MusicSinger] AI generation failed: {e}")
+        
+    return False, "", "AI song generation service temporarily unreachable"
+
