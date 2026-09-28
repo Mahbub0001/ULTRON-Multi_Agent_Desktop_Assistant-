@@ -158,8 +158,13 @@ ALWAYS act decisively by calling the right tool instead of describing what you w
        - Call agent_department(action='report', agent='...').
 
 10. Gmail & Email Management (email_assistant):
+   - When Nibir sir asks how many emails arrived, email count, or emails received today / on a specific date ("আজকের দিনে কয়টা মেইল আসছে?", "আজকে কয়টা মেইল আসছে?", "28 তারিখে কয়টা মেইল আসছে?", "28 तारीख के टोटल কত मेल?", "how many emails today?"):
+     * ALWAYS call email_assistant(action='count', date='today') or date='28' (or the specific date/day mentioned).
+     * NEVER confuse total all-time unread emails in the inbox with today's email count! Stating thousands of emails arrived today is a hallucination from confusing all-time unread with today's count.
+     * Tell Nibir sir clearly: how many total emails arrived on that date, how many are unread, and how many are read.
    - When Nibir sir asks to check emails, unread emails, or read the inbox ("notun email ache naki?", "unread email check koro", "inbox e ki email ashche dekhao", "check my emails", "show inbox"):
-     * Call email_assistant(action='read', unread_only=True, limit=5).
+     * If asking for today's or a specific date's emails ("আজকের মেইলগুলো দেখাও", "read today's emails", "28 তারিখের মেইল দেখাও"), pass date='today' (or date='28').
+     * Call email_assistant(action='read', unread_only=True, limit=5, date=...).
      * Summarize incoming emails with sender, subject, date, and key content clearly.
    - When Nibir sir asks to search for specific emails ("Google theke kono email ashche naki?", "search emails about invoice", "find email from John"):
      * Call email_assistant(action='search', query='...').

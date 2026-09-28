@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import smtplib
 import imaplib
 import sys
 import webbrowser
+from datetime import datetime, date, timedelta
 from email import policy
 from email.header import decode_header
 from email.message import EmailMessage
@@ -69,6 +71,63 @@ def load_email_config() -> dict:
         "imap_port": imap_port,
         "is_configured": bool(email_addr and app_pwd),
     }
+
+
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+_BENGALI_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+_DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+
+def _format_imap_date(dt: date) -> str:
+    """Formats a datetime.date object into RFC 3501 IMAP format: DD-Mon-YYYY."""
+    return f"{dt.day:02d}-{_MONTHS[dt.month - 1]}-{dt.year}"
+
+
+def _parse_date_to_imap(date_input: str | None) -> str | None:
+    """
+    Parses natural language date strings into IMAP DD-Mon-YYYY format.
+    Supports:
+      - 'today', 'আজ', 'আজকে', 'aaj', 'current'
+      - 'yesterday', 'গতকাল', 'গত কাল', 'kal'
+      - Day numbers: '28', '28th', '28 তারিখ', '28 तारीख', '২৮ তারিখ'
+      - ISO / standard dates: '2026-09-28', '28-09-2026', '28/09/2026', '28-Sep-2026'
+    """
+    if not date_input or not isinstance(date_input, str):
+        return None
+    raw = date_input.strip().lower()
+    if not raw:
+        return None
+
+    # Normalize Bengali and Devanagari numerals to ASCII
+    raw = raw.translate(_BENGALI_DIGITS).translate(_DEVANAGARI_DIGITS)
+
+    today = datetime.now().date()
+
+    if raw in ("today", "আজ", "আজকে", "aaj", "current", "আজকের"):
+        return _format_imap_date(today)
+    if raw in ("yesterday", "গতকাল", "গত কাল", "kal", "গতকালের"):
+        return _format_imap_date(today - timedelta(days=1))
+
+    # Try standard date string patterns
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d-%b-%Y", "%d %b %Y", "%d %B %Y"):
+        try:
+            parsed = datetime.strptime(raw, fmt).date()
+            return _format_imap_date(parsed)
+        except ValueError:
+            pass
+
+    # Extract 1 or 2 digit day of current month (e.g. '28 তারিখ', '28 तारीख', '28th', '28')
+    m = re.search(r"\b(\d{1,2})\b", raw)
+    if m:
+        day_num = int(m.group(1))
+        if 1 <= day_num <= 31:
+            try:
+                parsed = date(today.year, today.month, day_num)
+                return _format_imap_date(parsed)
+            except ValueError:
+                pass
+
+    return None
 
 
 def _decode_mime_str(header_val: str | None) -> str:
@@ -269,14 +328,12 @@ def _send_email(
         return f"❌ {err_msg}"
 
 
-def _fetch_emails(
+def _count_emails(
     config: dict,
-    limit: int = 5,
-    unread_only: bool = True,
-    query: str | None = None,
+    date_input: str | None = None,
     player=None,
 ) -> str:
-    """Fetches and summarizes emails from IMAP inbox."""
+    """Counts incoming emails for a specific date or overall inbox unread/total."""
     if not config.get("is_configured"):
         return (
             "⚠️ Email credentials not configured in `config/email_config.json`.\n"
@@ -288,6 +345,132 @@ def _fetch_emails(
     imap_srv = config.get("imap_server", "imap.gmail.com")
     imap_port = int(config.get("imap_port", 993))
 
+    imap_date = _parse_date_to_imap(date_input)
+
+    try:
+        _log(f"Connecting to IMAP {imap_srv}:{imap_port} for email count...", player)
+        imap = imaplib.IMAP4_SSL(imap_srv, imap_port, timeout=25)
+        imap.login(user_email, app_pwd)
+        status, _ = imap.select("INBOX")
+        if status != "OK":
+            return "Failed to access INBOX."
+
+        if imap_date:
+            # Count total for this specific date
+            crit_all = f'(ON "{imap_date}")'
+            st_all, data_all = imap.search(None, crit_all)
+            all_ids = data_all[0].split() if (st_all == "OK" and data_all and data_all[0]) else []
+
+            # Count unread for this specific date
+            crit_unseen = f'(UNSEEN ON "{imap_date}")'
+            st_unseen, data_unseen = imap.search(None, crit_unseen)
+            unseen_ids = data_unseen[0].split() if (st_unseen == "OK" and data_unseen and data_unseen[0]) else []
+
+            total_count = len(all_ids)
+            unread_count = len(unseen_ids)
+            read_count = max(0, total_count - unread_count)
+
+            today_str = _format_imap_date(datetime.now().date())
+            date_label = f"আজকে ({imap_date})" if imap_date == today_str else f"{imap_date} তারিখে"
+
+            if total_count == 0:
+                res = f"📊 **ইমেইল গণনা ({date_label}):**\nএই নির্দিষ্ট তারিখে আপনার ইনবক্সে কোনো ইমেইল পাওয়া যায়নি (০টি)।"
+                _log(res, player)
+                try:
+                    imap.close()
+                    imap.logout()
+                except Exception:
+                    pass
+                return res
+
+            # Fetch preview of recent subjects on that date (up to 3)
+            recent_ids = all_ids[-3:]
+            recent_ids.reverse()
+            preview_lines = []
+            for mid in recent_ids:
+                try:
+                    f_res, f_data = imap.fetch(mid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])")
+                    if f_res == "OK" and f_data:
+                        for part in f_data:
+                            if isinstance(part, tuple) and len(part) >= 2:
+                                raw_header = part[1]
+                                msg = BytesParser(policy=policy.default).parsebytes(raw_header)
+                                subj = _decode_mime_str(msg.get("subject", "(No Subject)"))
+                                frm = _decode_mime_str(msg.get("from", "(Unknown)"))
+                                preview_lines.append(f"   • **{subj}** (From: {frm})")
+                                break
+                except Exception:
+                    pass
+
+            try:
+                imap.close()
+                imap.logout()
+            except Exception:
+                pass
+
+            previews_str = ("\n**সাম্প্রতিক কয়েকটি ইমেইল:**\n" + "\n".join(preview_lines)) if preview_lines else ""
+            res = (
+                f"📊 **ইমেইল গণনা ({date_label}):**\n"
+                f"• মোট ইমেইল এসেছে: {total_count} টি\n"
+                f"• এর মধ্যে অপঠিত (Unread): {unread_count} টি\n"
+                f"• পঠিত (Read): {read_count} টি\n"
+                f"{previews_str}\n\n"
+                "💡 *বিস্তারিত পড়তে চাইলে 'আজকের মেইলগুলো দেখাও' বলতে পারেন।*"
+            )
+            _log(res, player)
+            return res
+
+        else:
+            # Overall inbox counts
+            st_unseen, data_unseen = imap.search(None, "UNSEEN")
+            unseen_ids = data_unseen[0].split() if (st_unseen == "OK" and data_unseen and data_unseen[0]) else []
+
+            st_all, data_all = imap.search(None, "ALL")
+            all_ids = data_all[0].split() if (st_all == "OK" and data_all and data_all[0]) else []
+
+            try:
+                imap.close()
+                imap.logout()
+            except Exception:
+                pass
+
+            res = (
+                f"📊 **ইনবক্স ইমেইল গণনা:**\n"
+                f"• মোট অপঠিত (Unread) ইমেইল: {len(unseen_ids)} টি\n"
+                f"• ইনবক্সে সর্বমোট সংরক্ষিত ইমেইল: {len(all_ids)} টি\n\n"
+                "💡 *আজকের বা নির্দিষ্ট দিনের হিসাব জানতে 'আজকের দিনে কয়টা মেইল আসছে?' বলুন।*"
+            )
+            _log(res, player)
+            return res
+
+    except Exception as e:
+        err = f"Failed to count emails via IMAP: {e}"
+        _log(err, player)
+        return f"❌ {err}"
+
+
+def _fetch_emails(
+    config: dict,
+    limit: int = 5,
+    unread_only: bool = True,
+    query: str | None = None,
+    date_input: str | None = None,
+    player=None,
+) -> str:
+    """Fetches and summarizes emails from IMAP inbox with optional date filtering."""
+    if not config.get("is_configured"):
+        return (
+            "⚠️ Email credentials not configured in `config/email_config.json`.\n"
+            "Cannot connect to IMAP inbox. Run the `setup_guide` action for step-by-step setup."
+        )
+
+    user_email = config["email"]
+    app_pwd = config["app_password"]
+    imap_srv = config.get("imap_server", "imap.gmail.com")
+    imap_port = int(config.get("imap_port", 993))
+
+    imap_date = _parse_date_to_imap(date_input)
+
     try:
         _log(f"Connecting to IMAP {imap_srv}:{imap_port}...", player)
         imap = imaplib.IMAP4_SSL(imap_srv, imap_port, timeout=25)
@@ -296,19 +479,31 @@ def _fetch_emails(
         if status != "OK":
             return "Failed to access INBOX."
 
-        # Search query
+        # Build search criteria
+        criteria_parts = []
+        if imap_date:
+            criteria_parts.append(f'ON "{imap_date}"')
+
         if query and query.strip():
             clean_q = query.strip().replace('"', "")
-            # Search subject or from or body
-            search_crit = f'(OR (SUBJECT "{clean_q}") (FROM "{clean_q}"))'
+            criteria_parts.append(f'(OR (SUBJECT "{clean_q}") (FROM "{clean_q}"))')
         elif unread_only:
-            search_crit = "UNSEEN"
-        else:
-            search_crit = "ALL"
+            criteria_parts.append("UNSEEN")
+        elif not imap_date:
+            criteria_parts.append("ALL")
+
+        search_crit = f'({" ".join(criteria_parts)})' if len(criteria_parts) > 1 else (criteria_parts[0] if criteria_parts else "ALL")
 
         status, data = imap.search(None, search_crit)
         if status != "OK" or not data or not data[0]:
-            label = f"matching '{query}'" if query else ("unread" if unread_only else "recent")
+            label_parts = []
+            if imap_date:
+                label_parts.append(f"on {imap_date}")
+            if query:
+                label_parts.append(f"matching '{query}'")
+            if unread_only:
+                label_parts.append("unread")
+            label = " ".join(label_parts) if label_parts else "recent"
             return f"📭 No {label} emails found in INBOX."
 
         msg_ids = data[0].split()
@@ -352,8 +547,9 @@ def _fetch_emails(
         if not parsed_emails:
             return "No emails could be fetched or parsed from INBOX."
 
+        date_header = f" for {imap_date}" if imap_date else ""
         out_lines = [
-            f"📬 **Found {total_found} email(s) (Showing {len(parsed_emails)}):**\n"
+            f"📬 **Found {total_found} email(s){date_header} (Showing {len(parsed_emails)}):**\n"
         ]
         for idx, em in enumerate(parsed_emails, 1):
             out_lines.append(
@@ -388,6 +584,7 @@ def email_assistant(
     limit = parameters.get("limit", 5)
     unread_only = parameters.get("unread_only", True)
     query = parameters.get("query")
+    date_val = parameters.get("date")
     fallback_to_web = parameters.get("fallback_to_web", True)
 
     config = load_email_config()
@@ -412,12 +609,20 @@ def email_assistant(
             player=player,
         )
 
+    elif action in ("count", "total", "summary"):
+        return _count_emails(
+            config=config,
+            date_input=date_val,
+            player=player,
+        )
+
     elif action in ("read", "unread", "inbox"):
         return _fetch_emails(
             config=config,
             limit=limit,
             unread_only=unread_only,
             query=query,
+            date_input=date_val,
             player=player,
         )
 
@@ -427,13 +632,14 @@ def email_assistant(
             limit=limit,
             unread_only=False,
             query=query or subject or recipient,
+            date_input=date_val,
             player=player,
         )
 
     else:
         return (
             f"Unknown email action '{action}'. "
-            "Supported actions: 'send', 'read', 'search', 'draft', 'open_webmail', 'setup_guide'."
+            "Supported actions: 'count', 'read', 'search', 'send', 'draft', 'open_webmail', 'setup_guide'."
         )
 
 
@@ -457,8 +663,8 @@ def _log(message: str, player=None) -> None:
 TOOL = {
     "name": "email_assistant",
     "description": (
-        "Manages email operations: send emails via SMTP, read/search inbox via IMAP, "
-        "draft email messages, open webmail composer in browser, or show setup guide."
+        "Manages email operations: counts emails on specific dates, reads/searches inbox via IMAP, "
+        "sends emails via SMTP, drafts email messages, opens webmail composer, or shows setup guide."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -466,10 +672,18 @@ TOOL = {
             "action": {
                 "type": "STRING",
                 "description": (
-                    "Email action to perform: 'send' (dispatch email), "
-                    "'read' (fetch unread/recent inbox), 'search' (search emails by query), "
+                    "Email action to perform: 'count' (count how many emails arrived on a date or overall), "
+                    "'read' (fetch unread/recent inbox, optionally by date), "
+                    "'search' (search emails by query/date), 'send' (dispatch email), "
                     "'draft' (format a draft), 'open_webmail' (open Gmail in browser), "
                     "or 'setup_guide' (instructions to configure credentials)."
+                ),
+            },
+            "date": {
+                "type": "STRING",
+                "description": (
+                    "Date filter: 'today', 'yesterday', '28', '28 তারিখ', '28 तारीख', '2026-09-28', etc. "
+                    "Use when the user asks about emails for today or a specific date."
                 ),
             },
             "recipient": {

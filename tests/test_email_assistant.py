@@ -13,6 +13,7 @@ if str(root) not in sys.path:
 from actions.email_assistant import (
     email_assistant,
     load_email_config,
+    _parse_date_to_imap,
     TOOL,
 )
 from core.action_loader import discover_actions
@@ -233,6 +234,89 @@ class TestEmailAssistant(unittest.TestCase):
         self.assertEqual(cfg["smtp_server"], "smtp.gmail.com")
         self.assertEqual(cfg["smtp_port"], 587)
         self.assertTrue(cfg["is_configured"])
+
+    def test_parse_date_to_imap(self):
+        # today & yesterday
+        today_imap = _parse_date_to_imap("today")
+        self.assertIsNotNone(today_imap)
+        self.assertRegex(today_imap, r"^\d{2}-[A-Z][a-z]{2}-\d{4}$")
+
+        yest_imap = _parse_date_to_imap("yesterday")
+        self.assertIsNotNone(yest_imap)
+        self.assertRegex(yest_imap, r"^\d{2}-[A-Z][a-z]{2}-\d{4}$")
+
+        # Specific day in Hindi/Bengali/English
+        d28 = _parse_date_to_imap("28 तारीख")
+        self.assertIsNotNone(d28)
+        self.assertTrue(d28.startswith("28-"))
+
+        d28_bn = _parse_date_to_imap("২৮ তারিখ")
+        self.assertIsNotNone(d28_bn)
+        self.assertTrue(d28_bn.startswith("28-"))
+
+        # ISO and standard
+        d_iso = _parse_date_to_imap("2026-09-28")
+        self.assertEqual(d_iso, "28-Sep-2026")
+
+    def test_tool_parameters_include_count_and_date(self):
+        props = TOOL["parameters"]["properties"]
+        self.assertIn("date", props)
+        action_desc = props["action"]["description"]
+        self.assertIn("count", action_desc)
+
+    @patch("actions.email_assistant._read_config_file")
+    @patch("actions.email_assistant.imaplib.IMAP4_SSL")
+    def test_count_emails_by_date(self, mock_imap_cls, mock_read_cfg):
+        mock_read_cfg.return_value = self.dummy_config
+        mock_imap = MagicMock()
+        mock_imap_cls.return_value = mock_imap
+
+        mock_imap.select.return_value = ("OK", [b"1"])
+        # Mock search: 1st call for all on date returns 5 ids, 2nd call for unseen on date returns 2 ids
+        mock_imap.search.side_effect = [
+            ("OK", [b"10 11 12 13 14"]),
+            ("OK", [b"13 14"]),
+        ]
+
+        res = email_assistant({
+            "action": "count",
+            "date": "today",
+        })
+        self.assertIn("5", res)  # total emails
+        self.assertIn("2", res)  # unread emails
+        # Verify search criteria included ON
+        calls = mock_imap.search.call_args_list
+        self.assertTrue(any("ON" in str(c) for c in calls))
+
+    @patch("actions.email_assistant._read_config_file")
+    @patch("actions.email_assistant.imaplib.IMAP4_SSL")
+    def test_read_emails_with_date_filter(self, mock_imap_cls, mock_read_cfg):
+        mock_read_cfg.return_value = self.dummy_config
+        mock_imap = MagicMock()
+        mock_imap_cls.return_value = mock_imap
+
+        mock_imap.select.return_value = ("OK", [b"1"])
+        mock_imap.search.return_value = ("OK", [b"55"])
+
+        msg = EmailMessage()
+        msg["From"] = "team@company.com"
+        msg["Subject"] = "Daily Standup"
+        msg["Date"] = "Mon, 28 Sep 2026 09:30:00 +0000"
+        msg.set_content("Standup at 10 AM.")
+        raw_email = msg.as_bytes()
+
+        mock_imap.fetch.return_value = ("OK", [(b"55 (RFC822 {100})", raw_email)])
+
+        res = email_assistant({
+            "action": "read",
+            "date": "28",
+            "unread_only": False,
+        })
+        self.assertIn("Daily Standup", res)
+        # Verify search called with ON "28-..."
+        call_crit = mock_imap.search.call_args[0][1]
+        self.assertIn("ON", call_crit)
+        self.assertIn("28-", call_crit)
 
 
 if __name__ == "__main__":
