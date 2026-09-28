@@ -360,6 +360,27 @@ def music_singer(
             return f"AI song was generated but could not be played: {msg}"
         return f"Failed to compose AI song: {msg}"
 
+    elif action == "recite":
+        if not query or not str(query).strip():
+            return "Please specify a poem title, poet, or theme to recite."
+        clean_q = str(query).strip()
+        if lyrics and str(lyrics).strip():
+            success, url_or_path, msg = generate_ai_song(clean_q, str(lyrics).strip())
+            if success:
+                if player.play_url(url_or_path, title=f"Recitation: {clean_q}"):
+                    return f"Now reciting '{clean_q}' in the background."
+                return f"Could not play recitation audio: {msg}"
+            return f"Failed to generate recitation: {msg}"
+        search_query = clean_q
+        if not any(w in search_query.lower() for w in ["recitation", "আবৃত্তি", "কবিতা", "poem"]):
+            search_query += " কবিতা আবৃত্তি"
+        success, url_or_path, title_or_msg = resolve_original_audio_stream(search_query)
+        if success:
+            if player.play_url(url_or_path, title=title_or_msg):
+                return f"Now playing recitation: '{title_or_msg}' in the background."
+            return f"Failed to play recitation stream for '{title_or_msg}'."
+        return f"Could not find recitation for '{clean_q}': {title_or_msg}"
+
     elif action == "pause":
         player.pause()
         return "Audio playback paused."
@@ -394,8 +415,9 @@ def music_singer(
 ACTION: dict[str, Any] = {
     "name": "music_singer",
     "description": (
-        "AI Singing and Background Music Engine. Use action='play' to search and play "
-        "original songs, tracks, or background music directly in the background with zero browser popups. "
+        "AI Singing, Poetry Recitation, and Background Audio Engine. Use action='play' to search and play "
+        "original songs, tracks, poems, or background music directly in the background with zero browser popups. "
+        "Use action='recite' to recite or play famous poetry (e.g. 'বিদ্রোহী কবিতা আবৃত্তি'). "
         "Use action='sing' to compose and sing brand new AI songs/tunes. "
         "Use action='pause', 'resume', 'stop', 'volume' (level 0-100), or 'status' to control playback."
     ),
@@ -404,12 +426,12 @@ ACTION: dict[str, Any] = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "enum": ["sing", "play", "pause", "resume", "stop", "volume", "status"],
-                "description": "Action to perform: 'sing' (compose AI song), 'play' (stream original song), 'pause', 'resume', 'stop', 'volume', 'status'"
+                "enum": ["sing", "play", "recite", "pause", "resume", "stop", "volume", "status"],
+                "description": "Action to perform: 'sing' (compose AI song), 'play' (stream original song/track), 'recite' (play or recite poem), 'pause', 'resume', 'stop', 'volume', 'status'"
             },
             "query": {
                 "type": "STRING",
-                "description": "Song title, artist name, mood, or musical theme (required for 'play' and 'sing')"
+                "description": "Song title, artist name, poem title, poet, or theme (required for 'play', 'recite', and 'sing')"
             },
             "lyrics": {
                 "type": "STRING",

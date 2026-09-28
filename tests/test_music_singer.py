@@ -85,9 +85,16 @@ class TestMusicSingerPlayer(unittest.TestCase):
         self.assertIn("level", props)
         self.assertEqual(
             props["action"]["enum"],
-            ["sing", "play", "pause", "resume", "stop", "volume", "status"]
+            ["sing", "play", "recite", "pause", "resume", "stop", "volume", "status"]
         )
         self.assertIs(ACTION["handler"], music_singer)
+
+    @patch("actions.music_singer._get_stream_url")
+    def test_music_singer_recite_poem(self, mock_stream):
+        mock_stream.return_value = ("http://stream.example/bidrohi.mp3", "বিদ্রোহী কবিতা আবৃত্তি - কাজী নজরুল ইসলাম")
+        from actions.music_singer import music_singer
+        res = music_singer(action="recite", query="বিদ্রোহী")
+        self.assertIn("বিদ্রোহী", res)
 
         # Test ULTRON dynamic action loader compatibility
         from core.action_loader import _validate
