@@ -1,10 +1,10 @@
 [
     {
         "id": 1,
-        "summary": "Team Standup Meeting",
-        "start": "2026-09-28 20:46",
-        "duration": 45,
-        "description": "",
-        "created_at": "2026-09-28 19:46:04"
+        "summary": "University Opening",
+        "start": "2026-10-02 20:30",
+        "duration": 30,
+        "description": "University Opening at 8:30 PM",
+        "created_at": "2026-09-28 20:08:51"
     }
 ]

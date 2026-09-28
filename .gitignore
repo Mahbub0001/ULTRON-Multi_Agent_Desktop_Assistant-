@@ -56,3 +56,5 @@ desktop.ini
 logs/
 downloads/
 screenshots/
+data/
+*.mp3

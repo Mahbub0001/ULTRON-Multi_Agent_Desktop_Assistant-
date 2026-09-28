@@ -191,7 +191,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         local_events.append(new_event)
         _save_local_events(local_events)
 
-        result_msg = f"Sir, event '{summary}' has been added to your local calendar for {start_dt.strftime('%B %d at %I:%M %p')}."
+        result_msg = f"Sir, event '{summary}' has been added to your LOCAL calendar storage (not Google Calendar) for {start_dt.strftime('%B %d at %I:%M %p')} because Google Calendar OAuth credentials are not connected."
 
     elif action in ("get_events", "get_today"):
         now = datetime.now()
@@ -210,7 +210,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
             result_msg = "Sir, you have no upcoming events or reminders scheduled."
         else:
             period_label = "today" if action == "get_today" else f"the next {days_ahead} days"
-            lines = [f"Sir, here are your scheduled events for {period_label}:"]
+            lines = [f"Sir, here are your scheduled events from local storage for {period_label}:"]
             for ev in upcoming:
                 lines.append(f"- {ev['summary']} - {ev['start']} ({ev['duration']} mins)")
             result_msg = "\n".join(lines)
