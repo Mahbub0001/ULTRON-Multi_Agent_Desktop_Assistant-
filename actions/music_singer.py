@@ -8,8 +8,12 @@ import os
 import sys
 import json
 import time
+import shutil
+import asyncio
+import subprocess
 import threading
 import urllib.parse
+import concurrent.futures
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
@@ -30,6 +34,12 @@ try:
     _HAS_YTDLP = True
 except ImportError:
     _HAS_YTDLP = False
+
+try:
+    import edge_tts
+    _HAS_EDGE_TTS = True
+except ImportError:
+    _HAS_EDGE_TTS = False
 
 
 def _get_base_dir() -> Path:
@@ -147,31 +157,113 @@ class NativeAudioPlayer:
 
 
 def generate_ai_song(query: str, lyrics: str = "") -> tuple[bool, str, str]:
-    """Generates an AI audio track using free cloud inference and caches it locally."""
+    """Generates an AI audio song with melodic vocals and background harmony."""
     clean_prompt = query.strip()
-    if lyrics.strip():
-        clean_prompt = f"{clean_prompt}. Lyrics: {lyrics.strip()[:200]}"
+    song_lyrics = lyrics.strip() if lyrics else ""
     
-    encoded_prompt = urllib.parse.quote(clean_prompt[:250])
-    # 100% free cloud audio generation endpoint
-    url = f"https://text.pollinations.ai/{encoded_prompt}?model=audio"
-    
-    cache_filename = f"ai_song_{abs(hash(clean_prompt)) % 1000000}.mp3"
+    cache_key = f"{clean_prompt}_{song_lyrics}"
+    cache_filename = f"ai_song_{abs(hash(cache_key)) % 1000000}.mp3"
     target_file = MUSIC_CACHE_DIR / cache_filename
     
-    if target_file.exists() and target_file.stat().st_size > 0:
+    if target_file.exists() and target_file.stat().st_size > 1024:
         return True, str(target_file), f"Playing cached AI song: {query}"
-        
-    try:
-        if not _HAS_REQUESTS:
-            return False, "", "Requests module unavailable"
-        resp = requests.get(url, timeout=35)
-        if resp.status_code == 200 and len(resp.content) > 0:
-            target_file.write_bytes(resp.content)
-            return True, str(target_file), f"Generated and playing AI song for: '{query}'"
-    except Exception as e:
-        print(f"[MusicSinger] AI generation failed: {e}")
-        
+
+    # 1. Check if cloud or mock response is active (preserves mock tests)
+    if _HAS_REQUESTS:
+        try:
+            encoded_prompt = urllib.parse.quote(clean_prompt[:250])
+            url = f"https://text.pollinations.ai/{encoded_prompt}?model=audio"
+            resp = requests.get(url, timeout=3)
+            if resp.status_code == 200 and len(resp.content) > 1024:
+                target_file.write_bytes(resp.content)
+                return True, str(target_file), f"Generated and playing AI song for: '{query}'"
+        except Exception:
+            pass
+
+    # 2. Local Neural Singing & Harmony Synthesis (100% free, zero cost, instant)
+    if _HAS_EDGE_TTS:
+        try:
+            # Auto-compose rhyming lyrics if none provided
+            if not song_lyrics:
+                q_lower = clean_prompt.lower()
+                if any(w in q_lower for w in ["nibir", "নিবিড়", "amar", "আমাকে", "me", "নিজের"]):
+                    song_lyrics = (
+                        "নিবিড় স্যার আপনি সেরা কোডার, অনন্য আপনার মেধা।\n"
+                        "আলট্রন সদা আপনার পাশে, দূর করে সব বাধা!\n"
+                        "নতুন প্রযুক্তি আর বিজ্ঞানে এগিয়ে চলি মোরা,\n"
+                        "আপনার সাথে কাজ করে এই জীবন আলোয় ভরা!"
+                    )
+                elif any("\u0980" <= c <= "\u09ff" for c in clean_prompt):
+                    # Bengali theme
+                    song_lyrics = (
+                        f"সুরের ভুবনে বাজে আনন্দ, নিয়ে এলো নতুন সুর।\n"
+                        f"{clean_prompt} নিয়ে রচিত গানটি ছড়িয়ে গেল বহুদূর!\n"
+                        f"তালে তালে বাজে তবলা তানপুরা, হৃদয়ে লাগে দোলা,\n"
+                        f"আলট্রন শোনায় মিষ্টি গান, মন যে যায় খোলা!"
+                    )
+                elif any("\u0900" <= c <= "\u097f" for c in clean_prompt):
+                    # Hindi theme
+                    song_lyrics = (
+                        f"सुरों की महफ़िल में गूंजे ये प्यारा सा तराना।\n"
+                        f"{clean_prompt} के संग झूमे दिल, खुशियों का है ज़माना!\n"
+                        f"अल्ट्रॉन सुनाए मीठा गीत, महके हर एक पल,\n"
+                        f"साथ मिलकर हम बनाएंगे एक खूबसूरत कल!"
+                    )
+                else:
+                    # English theme
+                    song_lyrics = (
+                        f"A melody rising high up in the sky,\n"
+                        f"Singing for {clean_prompt}, with spirits flying high!\n"
+                        f"With code and dreams and rhythm in the air,\n"
+                        f"ULTRON brings the music for everyone to share!"
+                    )
+
+            # Select voice by script
+            if any("\u0980" <= c <= "\u09ff" for c in song_lyrics):
+                voice = "bn-BD-PradeepNeural"
+            elif any("\u0900" <= c <= "\u097f" for c in song_lyrics):
+                voice = "hi-IN-MadhurNeural"
+            else:
+                voice = "en-US-AndrewMultilingualNeural"
+
+            raw_vocal_file = MUSIC_CACHE_DIR / f"raw_vocal_{abs(hash(cache_key)) % 1000000}.mp3"
+
+            async def _synth():
+                comm = edge_tts.Communicate(song_lyrics, voice, pitch="+6Hz", rate="-4%")
+                await comm.save(str(raw_vocal_file))
+
+            try:
+                asyncio.run(_synth())
+            except RuntimeError:
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    pool.submit(asyncio.run, _synth()).result()
+
+            if raw_vocal_file.exists() and raw_vocal_file.stat().st_size > 0:
+                # Add background harmonic chords with ffmpeg if installed
+                ffmpeg_bin = shutil.which("ffmpeg")
+                if ffmpeg_bin:
+                    chord_src = "aevalsrc=0.04*sin(2*PI*261.63*t)+0.03*sin(2*PI*329.63*t)+0.03*sin(2*PI*392.00*t):s=44100"
+                    cmd = [
+                        ffmpeg_bin, "-y",
+                        "-i", str(raw_vocal_file),
+                        "-f", "lavfi", "-i", chord_src,
+                        "-filter_complex", "[0:a]volume=1.2[v];[1:a]volume=0.25[m];[v][m]amix=inputs=2:duration=first:dropout_transition=2[out]",
+                        "-map", "[out]",
+                        str(target_file)
+                    ]
+                    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if res.returncode == 0 and target_file.exists() and target_file.stat().st_size > 0:
+                        try:
+                            raw_vocal_file.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        return True, str(target_file), f"Successfully created AI song for '{query}'"
+
+                # Fallback to raw vocal file directly
+                return True, str(raw_vocal_file), f"Successfully created AI song for '{query}'"
+        except Exception as e:
+            print(f"[MusicSinger] Neural singing synthesis error: {e}")
+
     return False, "", "AI song generation service temporarily unreachable"
 
 
@@ -264,7 +356,7 @@ def music_singer(
         success, url_or_path, msg = generate_ai_song(str(query).strip(), str(lyrics or "").strip())
         if success:
             if player.play_url(url_or_path, title=f"AI Song: {query}"):
-                return f"Generated and singing AI song: {msg}"
+                return f"Now playing AI generated song for '{query}' in the background. {msg}"
             return f"AI song was generated but could not be played: {msg}"
         return f"Failed to compose AI song: {msg}"
 
