@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ultron-desktop-assistant"
+version = "1.54.0"
+description = "ULTRON — Advanced Multi-Agent Desktop AI Assistant with Living Office & Autonomous Capabilities"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Nibir" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

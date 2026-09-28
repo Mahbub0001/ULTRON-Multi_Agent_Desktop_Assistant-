@@ -19,6 +19,13 @@ google-genai>=2.8.0,<3
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5
 playwright>=1.40,<2
+ddgs>=9,<10
+duckduckgo-search>=7.0.0
+
+# ── Music, Singing & Audio Streaming ──────────────────────────────────────────
+yt-dlp>=2024.1.0
+edge-tts>=6.1.0
+miniaudio>=1.59.0
 
 # ── Automation / input control ────────────────────────────────────────────────
 pyautogui
@@ -64,9 +71,6 @@ wmi;        sys_platform == "win32"
 # missing package disables exactly one feature and never stops the app. They are
 # declared because a feature that silently does nothing is worse than a slightly
 # longer install.
-ddgs>=9,<10                  # web_search — the maintained successor to
-                             # duckduckgo-search, which is tried first and
-                             # falls back to the old name automatically
 pdfplumber                   # file_processor — PDF text and tables
 PyPDF2                       # file_processor — PDF fallback reader
 python-docx                  # file_processor — .docx reading
@@ -82,7 +86,7 @@ pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
 #                            #   (also needs ffmpeg on PATH for most formats)
 #   pip install mediapipe    # pushup_counter: elbow-angle rep detection
 
-# ── Optional: local wake word ("Hey Jarvis") ──────────────────────────────────
+# ── Optional: local wake word ("Hey ULTRON") ──────────────────────────────────
 # Deliberately NOT installed by default — it's opt-in. Enable it (and download
 # the tiny model) with one click from ⚙ → WAKE WORD in the app, or install it
 # yourself with:  pip install openwakeword

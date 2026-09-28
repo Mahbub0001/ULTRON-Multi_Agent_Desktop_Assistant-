@@ -1,5 +1,5 @@
 """
-MARK LIV — one-time setup.
+ULTRON (MARK LIV) — one-time setup.
 
 Installs the Python dependencies for THIS operating system only: the OS-specific
 packages in requirements.txt carry `sys_platform` markers, so a macOS or Linux
@@ -7,7 +7,7 @@ user never pulls Windows-only libraries (and vice-versa). Then it fetches the
 Playwright browsers needed for web automation (current-OS builds only).
 
 Two things it deliberately does NOT install:
-  * the optional local wake word ("Hey Jarvis") — one-click, opt-in, from
+  * the optional local wake word ("Hey ULTRON") — one-click, opt-in, from
     ⚙ → WAKE WORD inside the app;
   * anything for the avatar — the holographic head renders in software on the
     PyQt6 and numpy already listed here. No GPU, no OpenGL, no extra packages.
@@ -21,7 +21,7 @@ OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 HERE = Path(__file__).resolve().parent
 
 MIN_PY = (3, 11)        # hard floor: below this the syntax used here won't parse
-MAX_PY = (3, 13)        # highest version this is actually tested on
+MAX_PY = (3, 14)        # highest version this is tested and verified on
 
 
 def _run(label: str, args: list[str]) -> None:
@@ -37,17 +37,14 @@ def _check_python() -> None:
     """
     v = sys.version_info[:2]
     if v > MAX_PY:
-        # Newer is a warning, not a wall. Turning away someone who installed
-        # today's Python is a worse first impression than a version that
-        # turns out to work fine, and if a wheel really is missing pip says
-        # so plainly.
+        # Newer is a warning, not a wall.
         print(f"\n⚠️  Python {v[0]}.{v[1]} is newer than the "
               f"{MAX_PY[0]}.{MAX_PY[1]} this is tested on. Continuing — if a "
               f"package has no wheel yet, install Python "
               f"{MAX_PY[0]}.{MAX_PY[1]} and run setup with that.")
         return
     if v < MIN_PY:
-        print(f"\n❌ Python {v[0]}.{v[1]} detected — MARK LIV needs at "
+        print(f"\n❌ Python {v[0]}.{v[1]} detected — ULTRON needs at "
               f"least Python {MIN_PY[0]}.{MIN_PY[1]}.")
         print("   Install a supported version and run setup with it, e.g.:")
         print(f"     py -{MIN_PY[0]}.{MIN_PY[1]} setup.py        (Windows)")
@@ -66,8 +63,43 @@ def _check_assets() -> None:
         )
 
 
+def _run_setuptools() -> None:
+    """Standard setuptools entrypoint when invoked via `pip install .` or `pip install -e .`"""
+    try:
+        from setuptools import setup, find_packages
+    except ImportError:
+        subprocess.run([sys.executable, "-m", "pip", "install", "setuptools"], check=True)
+        from setuptools import setup, find_packages
+
+    req_file = HERE / "requirements.txt"
+    install_requires = []
+    if req_file.exists():
+        for line in req_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                install_requires.append(line)
+
+    setup(
+        name="ultron-desktop-assistant",
+        version="1.54.0",
+        description="ULTRON — Advanced Multi-Agent Desktop AI Assistant with Living Office & Autonomous Capabilities",
+        long_description=(HERE / "README.md").read_text(encoding="utf-8") if (HERE / "README.md").exists() else "",
+        long_description_content_type="text/markdown",
+        author="Nibir",
+        python_requires=">=3.11",
+        packages=find_packages(),
+        install_requires=install_requires,
+        classifiers=[
+            "Programming Language :: Python :: 3",
+            "Operating System :: Microsoft :: Windows",
+            "Operating System :: MacOS",
+            "Operating System :: POSIX :: Linux",
+        ],
+    )
+
+
 def main() -> None:
-    print(f"⚙  MARK LIV setup — detected OS: {OS or 'unknown'}, "
+    print(f"⚙  ULTRON setup — detected OS: {OS or 'unknown'}, "
           f"Python {sys.version_info[0]}.{sys.version_info[1]}")
     _check_python()
 
@@ -77,10 +109,6 @@ def main() -> None:
 
     # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.
     # (Safari automation additionally needs: python -m playwright install webkit)
-    # Not fatal: these are a few hundred megabytes from a CDN that a corporate
-    # network or a flaky connection can refuse, and everything except browser
-    # automation works without them. Failing the whole install there would send
-    # a user away from a working app.
     try:
         _run("Installing Playwright browsers (chromium + firefox)…",
              [sys.executable, "-m", "playwright", "install", "chromium", "firefox"])
@@ -122,8 +150,12 @@ def main() -> None:
     print("\n✅ Setup complete!")
     print("   1) Launch it:  python main.py")
     print("   2) Paste your free Gemini API key when the setup screen appears.")
-    print("   3) (Optional) Enable 'Hey Jarvis' from ⚙ → WAKE WORD.")
+    print("   3) (Optional) Enable 'Hey ULTRON' from ⚙ → WAKE WORD.")
 
 
 if __name__ == "__main__":
-    main()
+    _SETUP_ARGS = {"install", "develop", "egg_info", "dist_info", "bdist_wheel", "sdist", "build"}
+    if len(sys.argv) > 1 and any(arg in _SETUP_ARGS or arg.startswith("-") for arg in sys.argv[1:]):
+        _run_setuptools()
+    else:
+        main()
