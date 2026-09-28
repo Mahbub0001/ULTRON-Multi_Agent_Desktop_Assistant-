@@ -152,6 +152,32 @@ _DEFAULT_AGENTS: list[dict[str, Any]] = [
 
 
 
+def resolve_agent_path(raw_path: str) -> Path:
+    """Intelligently resolves an agent's file path against the project root or Desktop."""
+    raw = (raw_path or "").strip().replace("\\", "/").strip('"').strip("'")
+    if not raw:
+        return Path.cwd()
+    p = Path(raw).expanduser()
+    if p.is_absolute():
+        return p
+    parts = [part.lower() for part in p.parts]
+    if "jarvisprojects" in parts:
+        idx = parts.index("jarvisprojects")
+        rel_sub = Path(*p.parts[idx+1:])
+        return Path.home() / "Desktop" / "JarvisProjects" / rel_sub
+    if parts and parts[0] == "desktop":
+        rel_sub = Path(*p.parts[1:])
+        return Path.home() / "Desktop" / rel_sub
+    # If the target exists in current project workspace, prioritize project root
+    cwd_target = Path.cwd() / p
+    if cwd_target.exists():
+        return cwd_target
+    # If path starts with common project directories, resolve to project root
+    if parts and parts[0] in (".", "config", "core", "actions", "memory", "tests", "docs", "scratch", "data"):
+        return cwd_target
+    return cwd_target
+
+
 def _clean_agent_path(raw_path: str) -> Path:
     raw = (raw_path or "").strip().replace("\\", "/").strip('"').strip("'")
     if not raw:
