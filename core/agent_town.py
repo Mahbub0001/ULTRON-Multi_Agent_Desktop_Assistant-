@@ -324,39 +324,146 @@ class AgentTownManager:
                 content = str(args.get("content", ""))
                 if not raw_path:
                     return "Error: File path is required."
-                target = _clean_agent_path(raw_path)
+                target = resolve_agent_path(raw_path)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
                 return f"Successfully wrote {len(content)} characters to {target.resolve()}."
+
+            elif t_name in ("search_code", "grep"):
+                query = str(args.get("query", "")).strip()
+                if not query:
+                    return "Error: Search query is required."
+                raw_dir = str(args.get("path", ".")).strip()
+                search_dir = resolve_agent_path(raw_dir)
+                pattern = str(args.get("file_pattern", "")).strip().lower()
+                if not search_dir.is_dir():
+                    return f"Error: Directory '{search_dir}' does not exist."
+
+                matches = []
+                for root, dirs, files in os.walk(search_dir):
+                    dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", ".pytest_cache", "node_modules", ".venv", "venv")]
+                    for f in files:
+                        if pattern and not f.lower().endswith(pattern.lstrip("*")):
+                            continue
+                        if f.lower().endswith((".png", ".jpg", ".jpeg", ".ico", ".exe", ".pyc", ".pyd", ".docx", ".pdf", ".zip")):
+                            continue
+                        fpath = Path(root) / f
+                        try:
+                            lines = fpath.read_text(encoding="utf-8", errors="ignore").splitlines()
+                            for idx, line in enumerate(lines, 1):
+                                if query.lower() in line.lower():
+                                    try:
+                                        rel = fpath.relative_to(search_dir)
+                                    except Exception:
+                                        rel = fpath
+                                    matches.append(f"{rel}:{idx}: {line.strip()[:140]}")
+                                    if len(matches) >= 50:
+                                        break
+                        except Exception:
+                            continue
+                        if len(matches) >= 50:
+                            break
+                    if len(matches) >= 50:
+                        break
+
+                if not matches:
+                    return f"No matches found for '{query}' in {search_dir}."
+                return f"Found {len(matches)} match(es) for '{query}':\n" + "\n".join(matches)
 
             elif t_name == "read_file":
                 raw_path = str(args.get("path", "")).strip()
                 if not raw_path:
                     return "Error: File path is required."
-                target = _clean_agent_path(raw_path)
+                target = resolve_agent_path(raw_path)
                 if not target.is_file():
                     return f"Error: File '{target}' does not exist."
                 content = target.read_text(encoding="utf-8", errors="replace")
-                if len(content) > 15000:
-                    content = content[:15000] + "\n...[truncated remainder of file]"
-                return content
+                all_lines = content.splitlines()
+                total_lines = len(all_lines)
+
+                try:
+                    start_line = int(args.get("start_line", 1))
+                except (ValueError, TypeError):
+                    start_line = 1
+                try:
+                    end_line = int(args.get("end_line", -1))
+                except (ValueError, TypeError):
+                    end_line = -1
+
+                if start_line < 1:
+                    start_line = 1
+
+                if end_line == -1:
+                    if total_lines > 350:
+                        selected = all_lines[:350]
+                        numbered = [f"{i+1:4d}: {line}" for i, line in enumerate(selected)]
+                        return (f"File '{target.name}' has {total_lines} lines. Showing lines 1-350:\n"
+                                + "\n".join(numbered)
+                                + f"\n... [{total_lines - 350} more lines. Use start_line and end_line to inspect specific ranges]")
+                    else:
+                        numbered = [f"{i+1:4d}: {line}" for i, line in enumerate(all_lines)]
+                        return "\n".join(numbered) if numbered else "(Empty file)"
+                else:
+                    if end_line > total_lines:
+                        end_line = total_lines
+                    selected = all_lines[start_line - 1 : end_line]
+                    numbered = [f"{i+start_line:4d}: {line}" for i, line in enumerate(selected)]
+                    return f"File '{target.name}' (lines {start_line}-{end_line} of {total_lines}):\n" + "\n".join(numbered)
+
+            elif t_name in ("edit_file", "replace_file_content"):
+                raw_path = str(args.get("path", "")).strip()
+                target_str = str(args.get("target", ""))
+                replacement_str = str(args.get("replacement", ""))
+
+                if not raw_path:
+                    return "Error: File path is required."
+                if not target_str:
+                    return "Error: Target string to replace is required."
+
+                target = resolve_agent_path(raw_path)
+                if not target.is_file():
+                    return f"Error: File '{target}' does not exist."
+
+                content = target.read_text(encoding="utf-8", errors="replace")
+                count = content.count(target_str)
+                if count == 0:
+                    return f"Error: Target string not found in '{target.name}'. Verify exact indentation and text."
+                if count > 1:
+                    return f"Error: Target string found {count} times in '{target.name}'. Please provide a larger unique block including surrounding lines."
+
+                new_content = content.replace(target_str, replacement_str, 1)
+
+                if target.suffix.lower() == ".py":
+                    try:
+                        import ast
+                        ast.parse(new_content)
+                    except SyntaxError as syn_err:
+                        return f"Error: Edit rejected. Python syntax error at line {syn_err.lineno}: {syn_err.msg}."
+
+                target.write_text(new_content, encoding="utf-8")
+                return f"Successfully updated '{target.name}' ({len(content)} -> {len(new_content)} bytes). Syntax verified."
 
             elif t_name == "run_command":
                 cmd = str(args.get("command", "")).strip()
                 if not cmd:
                     return "Error: Command is required."
+                raw_cwd = str(args.get("cwd", ".")).strip()
+                target_cwd = resolve_agent_path(raw_cwd)
+                if not target_cwd.is_dir():
+                    target_cwd = Path.cwd()
                 # Run command in PowerShell or cmd with timeout
                 shell_cmd = ["powershell", "-NoProfile", "-Command", cmd] if platform.system() == "Windows" else ["bash", "-c", cmd]
                 proc = subprocess.run(
                     shell_cmd,
                     capture_output=True,
                     text=True,
-                    timeout=args.get("timeout", 25),
+                    cwd=str(target_cwd),
+                    timeout=args.get("timeout", 45),
                     **_WIN_HIDE,
                 )
                 out = (proc.stdout or "").strip()
                 err = (proc.stderr or "").strip()
-                res = f"Exit Code: {proc.returncode}\n"
+                res = f"Exit Code: {proc.returncode} (cwd: {target_cwd})\n"
                 if out:
                     res += f"STDOUT:\n{out[:4000]}\n"
                 if err:
@@ -365,7 +472,7 @@ class AgentTownManager:
 
             elif t_name == "list_files":
                 raw_path = str(args.get("directory", "")).strip()
-                dir_path = Path(raw_path).expanduser() if raw_path else (Path.home() / "Desktop")
+                dir_path = resolve_agent_path(raw_path) if raw_path else Path.cwd()
                 if not dir_path.is_dir():
                     return f"Error: Directory '{dir_path}' does not exist."
                 items = [f"{'[DIR] ' if p.is_dir() else '[FILE] '}{p.name}" for p in sorted(dir_path.iterdir())[:40]]
