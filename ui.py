@@ -6285,8 +6285,20 @@ class MainWindow(QMainWindow):
 
     def _on_setup_done(self, key: str, os_name: str):
         os.makedirs(CONFIG_DIR, exist_ok=True)
+        cur = {}
+        if API_FILE.exists():
+            try:
+                cur = json.loads(API_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cur = {}
+        cur["gemini_api_key"] = key
+        cur["os_system"] = os_name
+        if not cur.get("user_name"):
+            cur["user_name"] = "Nibir"
+        if not cur.get("assistant_name"):
+            cur["assistant_name"] = "ULTRON"
         API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
+            json.dumps(cur, indent=4),
             encoding="utf-8",
         )
         self._ready = True

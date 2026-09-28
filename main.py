@@ -602,7 +602,7 @@ class JarvisLive:
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
 
-        _base_dir = Path(__file__).resolve().parent
+        _base_dir = BASE_DIR
         _inline_names = {t["name"] for t in TOOL_DECLARATIONS}
 
         # File-backed tools: every actions/*.py with a TOOL dict, discovered the
@@ -954,14 +954,16 @@ class JarvisLive:
         try:
             _cfg = json.loads(open(API_CONFIG_PATH, encoding="utf-8").read())
             self._asst_name = (_cfg.get("assistant_name") or "ULTRON").strip()
-            _user_name = (_cfg.get("user_name") or "").strip()
+            self._user_name = (_cfg.get("user_name") or "Nibir").strip() or "Nibir"
         except Exception:
             self._asst_name = "ULTRON"
-            _user_name = ""
+            self._user_name = "Nibir"
 
         memory     = load_memory()
         mem_str    = format_memory_for_prompt(memory)
         sys_prompt = _load_system_prompt()
+        if self._user_name and self._user_name.lower() != "nibir":
+            sys_prompt = sys_prompt.replace("Nibir", self._user_name).replace("নিবিড়", self._user_name)
 
         now      = datetime.now()
         time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
@@ -973,8 +975,8 @@ class JarvisLive:
 
         # Identity injection — overrides any hardcoded name in prompt.txt
         _addr = (
-            "ADDRESS: The user's name is Nibir. In the initial startup greeting, greet him with salam as 'Nibir sir' / 'নিবিড় স্যার'. "
-            "In ALL ongoing conversation and everyday replies, do NOT repeat 'Nibir sir' every time — simply address him respectfully as 'sir' / 'স্যার' naturally."
+            f"ADDRESS: The user's name is {self._user_name}. In the initial startup greeting, greet him with salam as '{self._user_name} sir' / '{self._user_name} স্যার'. "
+            f"In ALL ongoing conversation and everyday replies, do NOT repeat '{self._user_name} sir' every time — simply address him respectfully as 'sir' / 'স্যার' naturally."
         )
         identity_ctx = (
             f"[IDENTITY]\n"
@@ -1798,10 +1800,11 @@ class JarvisLive:
         if not self.session:
             return
 
+        _uname = getattr(self, "_user_name", "Nibir") or "Nibir"
         p1 = (
-            "Say this exact greeting warmly in Bengali: "
-            "'আসসালামু আলাইকুম নিবিড় স্যার, আমি কিভাবে আপনার সহযোগিতা করতে পারি?' "
-            "(Assalamu alaikum Nibir sir, ami kivabe apnar shohojogita korte pari?). "
+            f"Say this exact greeting warmly in Bengali: "
+            f"'আসসালামু আলাইকুম {_uname} স্যার, আমি কিভাবে আপনার সহযোগিতা করতে পারি?' "
+            f"(Assalamu alaikum {_uname} sir, ami kivabe apnar shohojogita korte pari?). "
             "Do NOT fetch or read any news. Do NOT mention news headlines. Do not call any tools."
         )
 
@@ -1812,7 +1815,7 @@ class JarvisLive:
             turns={"role": "user", "parts": [{"text": p1}]},
             turn_complete=True,
         )
-        print("[ULTRON] Startup greeting sent to Nibir sir.")
+        print(f"[ULTRON] Startup greeting sent to {_uname} sir.")
 
     # ── Session memory ──────────────────────────────────────────────────────────
 
