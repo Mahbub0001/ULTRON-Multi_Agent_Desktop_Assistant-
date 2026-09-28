@@ -1,0 +1,10 @@
+{
+    "email": "your_email@gmail.com",
+    "app_password": "xxxx xxxx xxxx xxxx",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "imap_server": "imap.gmail.com",
+    "imap_port": 993,
+    "user_name": "Your Name",
+    "note": "For Gmail: Turn on 2-Step Verification in Google Account -> Security -> 2-Step Verification -> App passwords -> Generate a 16-character password and paste here."
+}

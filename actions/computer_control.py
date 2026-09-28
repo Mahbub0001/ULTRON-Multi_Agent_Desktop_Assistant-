@@ -412,6 +412,296 @@ def _minimize_window() -> str:
     pyautogui.hotkey("win", "down")
     return "Minimized active window."
 
+def _restore_window() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "up")
+    return "Restored active window."
+
+def _snap_left() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "left")
+    return "Snapped window to left."
+
+def _snap_right() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "right")
+    return "Snapped window to right."
+
+def _move_window_monitor(direction: str = "left") -> str:
+    _require_pyautogui()
+    if direction == "left":
+        pyautogui.hotkey("win", "shift", "left")
+    elif direction == "right":
+        pyautogui.hotkey("win", "shift", "right")
+    return f"Moved window to {direction} monitor."
+
+def _close_tab() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "w")
+    return "Closed tab."
+
+def _new_tab() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "t")
+    return "Opened new tab."
+
+def _reopen_tab() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "shift", "t")
+    return "Reopened last closed tab."
+
+def _next_tab() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "tab")
+    return "Next tab."
+
+def _prev_tab() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "shift", "tab")
+    return "Previous tab."
+
+def _copy() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "c")
+    return "Copied."
+
+def _cut() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "x")
+    return "Cut."
+
+def _paste() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "v")
+    return "Pasted."
+
+def _select_all() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "a")
+    return "Selected all."
+
+def _find() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "f")
+    return "Opened find."
+
+def _print() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "p")
+    return "Opened print dialog."
+
+def _save_as() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "shift", "s")
+    return "Opened save as dialog."
+
+def _zoom_in() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "+")
+    return "Zoomed in."
+
+def _zoom_out() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "-")
+    return "Zoomed out."
+
+def _zoom_reset() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "0")
+    return "Zoom reset."
+
+def _fullscreen() -> str:
+    _require_pyautogui()
+    pyautogui.press("f11")
+    return "Toggled fullscreen."
+
+def _task_manager() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("ctrl", "shift", "esc")
+    return "Opened Task Manager."
+
+def _run_dialog() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "r")
+    return "Opened Run dialog."
+
+def _settings() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "i")
+    return "Opened Windows Settings."
+
+def _file_explorer() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "e")
+    return "Opened File Explorer."
+
+def _action_center() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "a")
+    return "Opened Action Center."
+
+def _quick_settings() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "shift", "s")
+    return "Opened Quick Settings / Snip tool."
+
+def _emoji_picker() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", ".")
+    return "Opened emoji picker."
+
+def _clipboard_history() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "v")
+    return "Opened clipboard history."
+
+def _virtual_desktop_new() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "ctrl", "d")
+    return "Created new virtual desktop."
+
+def _virtual_desktop_close() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "ctrl", "f4")
+    return "Closed current virtual desktop."
+
+def _virtual_desktop_switch(direction: str = "left") -> str:
+    _require_pyautogui()
+    if direction == "left":
+        pyautogui.hotkey("win", "ctrl", "left")
+    elif direction == "right":
+        pyautogui.hotkey("win", "ctrl", "right")
+    return f"Switched virtual desktop {direction}."
+
+def _lock_screen() -> str:
+    _require_pyautogui()
+    pyautogui.hotkey("win", "l")
+    return "Locked screen."
+
+# App-specific shortcuts
+def _app_shortcut(app: str, action: str) -> str:
+    """Execute app-specific shortcuts."""
+    _require_pyautogui()
+    app = app.lower().strip()
+    
+    shortcuts = {
+        # VS Code
+        "vscode": {
+            "command_palette": ["ctrl", "shift", "p"],
+            "terminal": ["ctrl", "`"],
+            "new_file": ["ctrl", "n"],
+            "save_all": ["ctrl", "k", "s"],
+            "format": ["shift", "alt", "f"],
+            "toggle_sidebar": ["ctrl", "b"],
+            "toggle_panel": ["ctrl", "j"],
+            "go_to_file": ["ctrl", "p"],
+            "go_to_line": ["ctrl", "g"],
+            "search": ["ctrl", "shift", "f"],
+            "replace": ["ctrl", "h"],
+            "zen_mode": ["ctrl", "k", "z"],
+            "split_editor": ["ctrl", "\\"],
+            "close_editor": ["ctrl", "w"],
+            "reopen_closed": ["ctrl", "shift", "t"],
+            "debug_start": ["f5"],
+            "debug_stop": ["shift", "f5"],
+        },
+        # Chrome/Edge/Brave
+        "chrome": {
+            "devtools": ["f12"],
+            "devtools_console": ["ctrl", "shift", "j"],
+            "devtools_elements": ["ctrl", "shift", "c"],
+            "new_incognito": ["ctrl", "shift", "n"],
+            "history": ["ctrl", "h"],
+            "downloads": ["ctrl", "j"],
+            "bookmarks": ["ctrl", "shift", "o"],
+            "clear_browsing": ["ctrl", "shift", "delete"],
+            "focus_address": ["ctrl", "l"],
+            "focus_search": ["ctrl", "e"],
+        },
+        "edge": {
+            "devtools": ["f12"],
+            "devtools_console": ["ctrl", "shift", "j"],
+            "devtools_elements": ["ctrl", "shift", "c"],
+            "new_inprivate": ["ctrl", "shift", "n"],
+            "history": ["ctrl", "h"],
+            "downloads": ["ctrl", "j"],
+            "collections": ["ctrl", "shift", "y"],
+            "focus_address": ["ctrl", "l"],
+        },
+        "firefox": {
+            "devtools": ["f12"],
+            "devtools_console": ["ctrl", "shift", "k"],
+            "devtools_elements": ["ctrl", "shift", "c"],
+            "new_private": ["ctrl", "shift", "p"],
+            "history": ["ctrl", "shift", "h"],
+            "downloads": ["ctrl", "j"],
+            "bookmarks": ["ctrl", "shift", "o"],
+            "focus_address": ["ctrl", "l"],
+            "focus_search": ["ctrl", "k"],
+        },
+        # YouTube (in browser)
+        "youtube": {
+            "play_pause": ["k"],
+            "next": ["shift", "n"],
+            "prev": ["shift", "p"],
+            "fullscreen": ["f"],
+            "theater": ["t"],
+            "mini_player": ["i"],
+            "captions": ["c"],
+            "mute": ["m"],
+            "volume_up": ["up"],
+            "volume_down": ["down"],
+            "seek_forward_10": ["l"],
+            "seek_back_10": ["j"],
+            "seek_forward_frame": [">"],
+            "seek_back_frame": ["<"],
+            "restart": ["0"],
+            "speed_up": ["shift", "."],
+            "speed_down": ["shift", ","],
+            "speed_normal": ["shift", "/"],
+        },
+        # Generic text editors
+        "notepad": {
+            "new_window": ["ctrl", "shift", "n"],
+            "save_as": ["ctrl", "shift", "s"],
+            "word_wrap": ["alt", "o", "w"],
+            "font": ["alt", "o", "f"],
+            "status_bar": ["alt", "v", "s"],
+        },
+        "word": {
+            "bold": ["ctrl", "b"],
+            "italic": ["ctrl", "i"],
+            "underline": ["ctrl", "u"],
+            "center": ["ctrl", "e"],
+            "left_align": ["ctrl", "l"],
+            "right_align": ["ctrl", "r"],
+            "justify": ["ctrl", "j"],
+            "heading1": ["ctrl", "alt", "1"],
+            "heading2": ["ctrl", "alt", "2"],
+            "heading3": ["ctrl", "alt", "3"],
+            "bullet_list": ["ctrl", "shift", "l"],
+        },
+        "excel": {
+            "new_sheet": ["shift", "f11"],
+            "insert_row": ["ctrl", "shift", "+"],
+            "delete_row": ["ctrl", "-"],
+            "filter": ["ctrl", "shift", "l"],
+            "format_cells": ["ctrl", "1"],
+            "auto_sum": ["alt", "="],
+        },
+    }
+    
+    if app not in shortcuts:
+        return f"Unknown app: {app}. Available: {', '.join(shortcuts.keys())}"
+    
+    if action not in shortcuts[app]:
+        available = ", ".join(shortcuts[app].keys())
+        return f"Unknown action '{action}' for {app}. Available: {available}"
+    
+    keys = shortcuts[app][action]
+    pyautogui.hotkey(*keys)
+    return f"{app}: {action} ({'+'.join(keys)})"
+
 def _switch_app() -> str:
     _require_pyautogui()
     pyautogui.hotkey("alt", "tab")
@@ -613,6 +903,105 @@ def computer_control(
         if action in ("minimize_window", "minimize"):
             return _minimize_window()
 
+        if action in ("restore_window", "restore"):
+            return _restore_window()
+
+        if action in ("snap_left", "snap_left"):
+            return _snap_left()
+
+        if action in ("snap_right", "snap_right"):
+            return _snap_right()
+
+        if action in ("move_window_monitor", "move_monitor"):
+            return _move_window_monitor(params.get("direction", "left"))
+
+        if action in ("close_tab",):
+            return _close_tab()
+
+        if action in ("new_tab",):
+            return _new_tab()
+
+        if action in ("reopen_tab",):
+            return _reopen_tab()
+
+        if action in ("next_tab",):
+            return _next_tab()
+
+        if action in ("prev_tab", "previous_tab"):
+            return _prev_tab()
+
+        if action in ("copy",):
+            return _copy()
+
+        if action in ("cut",):
+            return _cut()
+
+        if action in ("paste",):
+            return _paste()
+
+        if action in ("select_all",):
+            return _select_all()
+
+        if action in ("find",):
+            return _find()
+
+        if action in ("print",):
+            return _print()
+
+        if action in ("save_as",):
+            return _save_as()
+
+        if action in ("zoom_in",):
+            return _zoom_in()
+
+        if action in ("zoom_out",):
+            return _zoom_out()
+
+        if action in ("zoom_reset",):
+            return _zoom_reset()
+
+        if action in ("fullscreen",):
+            return _fullscreen()
+
+        if action in ("task_manager",):
+            return _task_manager()
+
+        if action in ("run_dialog",):
+            return _run_dialog()
+
+        if action in ("settings", "windows_settings"):
+            return _settings()
+
+        if action in ("file_explorer", "explorer"):
+            return _file_explorer()
+
+        if action in ("action_center",):
+            return _action_center()
+
+        if action in ("quick_settings", "snip_tool"):
+            return _quick_settings()
+
+        if action in ("emoji_picker",):
+            return _emoji_picker()
+
+        if action in ("clipboard_history",):
+            return _clipboard_history()
+
+        if action in ("virtual_desktop_new", "new_desktop"):
+            return _virtual_desktop_new()
+
+        if action in ("virtual_desktop_close", "close_desktop"):
+            return _virtual_desktop_close()
+
+        if action in ("virtual_desktop_switch", "switch_desktop"):
+            return _virtual_desktop_switch(params.get("direction", "left"))
+
+        if action in ("lock_screen", "lock"):
+            return _lock_screen()
+
+        if action in ("app_shortcut", "app_hotkey"):
+            return _app_shortcut(params.get("app", ""), params.get("app_action", ""))
+
         if action in ("switch_app", "alt_tab"):
             return _switch_app()
 
@@ -653,13 +1042,13 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Complete computer & desktop app control: type, click, hotkeys, scroll, focus_window, list_windows, active_window, close_window, maximize_window, minimize_window, switch_app, save, select_all, screenshots, find and click screen elements.",
+    "description": "Complete computer & desktop app control: type, click, hotkeys, scroll, window management (snap, restore, move monitor), tab management, text editing (copy, cut, paste, select all, find, zoom), system shortcuts (task manager, settings, file explorer, clipboard history, virtual desktops, lock), and app-specific hotkeys (VS Code, Chrome, Firefox, YouTube, Word, Excel, Notepad).",
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | list_windows | active_window | close_window | maximize_window | minimize_window | switch_app | save | select_all | undo | redo | screen_find | screen_click | random_data | user_data"
+                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | drag | copy | cut | paste | screenshot | wait | clear_field | focus_window | list_windows | active_window | close_window | maximize_window | minimize_window | restore_window | snap_left | snap_right | move_window_monitor | close_tab | new_tab | reopen_tab | next_tab | prev_tab | select_all | find | print | save_as | zoom_in | zoom_out | zoom_reset | fullscreen | task_manager | run_dialog | settings | file_explorer | action_center | quick_settings | emoji_picker | clipboard_history | virtual_desktop_new | virtual_desktop_close | virtual_desktop_switch | lock_screen | app_shortcut | switch_app | save | select_all | undo | redo | screen_find | screen_click | random_data | user_data"
             },
             "text": {
                 "type": "STRING",
@@ -673,6 +1062,22 @@ TOOL = {
                 "type": "INTEGER",
                 "description": "Y coordinate"
             },
+            "x1": {
+                "type": "INTEGER",
+                "description": "Start X for drag"
+            },
+            "y1": {
+                "type": "INTEGER",
+                "description": "Start Y for drag"
+            },
+            "x2": {
+                "type": "INTEGER",
+                "description": "End X for drag"
+            },
+            "y2": {
+                "type": "INTEGER",
+                "description": "End Y for drag"
+            },
             "keys": {
                 "type": "STRING",
                 "description": "Key combination e.g. 'ctrl+c'"
@@ -683,7 +1088,7 @@ TOOL = {
             },
             "direction": {
                 "type": "STRING",
-                "description": "up | down | left | right"
+                "description": "up | down | left | right (for scroll, move_window_monitor, virtual_desktop_switch, snap)"
             },
             "amount": {
                 "type": "INTEGER",
@@ -716,6 +1121,14 @@ TOOL = {
             "path": {
                 "type": "STRING",
                 "description": "Save path for screenshot"
+            },
+            "app": {
+                "type": "STRING",
+                "description": "App name for app_shortcut: vscode | chrome | edge | firefox | youtube | notepad | word | excel"
+            },
+            "app_action": {
+                "type": "STRING",
+                "description": "App-specific action for app_shortcut (e.g. command_palette, devtools, play_pause, bold, etc.)"
             }
         },
         "required": [

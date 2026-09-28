@@ -719,6 +719,66 @@ class _BrowserSession:
         except Exception as e:
             return f"Key error: {e}"
 
+    async def hotkey(self, *keys: str) -> str:
+        """Press key combination, e.g. hotkey('ctrl', 'shift', 't')"""
+        page = await self._get_page()
+        try:
+            await page.keyboard.press("+".join(keys))
+            return f"Hotkey: {'+'.join(keys)}"
+        except Exception as e:
+            return f"Hotkey error: {e}"
+
+    # YouTube / media specific shortcuts
+    async def youtube_speed(self, direction: str = "up") -> str:
+        """Control YouTube playback speed: 'up' (Shift+.), 'down' (Shift+,), 'normal' (Shift+/) """
+        page = await self._get_page()
+        try:
+            if direction == "up":
+                await page.keyboard.press("Shift+.")
+            elif direction == "down":
+                await page.keyboard.press("Shift+,")
+            elif direction == "normal":
+                await page.keyboard.press("Shift+/")
+            else:
+                return f"Unknown direction: {direction}. Use 'up', 'down', or 'normal'."
+            return f"YouTube speed {direction}."
+        except Exception as e:
+            return f"YouTube speed error: {e}"
+
+    async def youtube_control(self, action: str) -> str:
+        """YouTube player controls: play_pause, next, prev, fullscreen, theater, mini, captions, quality"""
+        page = await self._get_page()
+        key_map = {
+            "play_pause": "k",
+            "pause": "k",
+            "play": "k",
+            "next": "Shift+n",
+            "prev": "Shift+p",
+            "fullscreen": "f",
+            "theater": "t",
+            "mini": "i",
+            "captions": "c",
+            "mute": "m",
+            "volume_up": "ArrowUp",
+            "volume_down": "ArrowDown",
+            "seek_forward": "l",      # 10s forward
+            "seek_back": "j",         # 10s back
+            "seek_forward_long": "Shift+l",  # frame by frame? actually > key
+            "seek_back_long": "Shift+j",
+            "restart": "0",
+            "speed_up": "Shift+.",
+            "speed_down": "Shift+,",
+            "speed_normal": "Shift+/",
+        }
+        key = key_map.get(action.lower())
+        if not key:
+            return f"Unknown YouTube action: {action}. Available: {', '.join(key_map.keys())}"
+        try:
+            await page.keyboard.press(key)
+            return f"YouTube: {action}"
+        except Exception as e:
+            return f"YouTube control error: {e}"
+
     async def get_text(self) -> str:
         page = await self._get_page()
         try:
@@ -1037,11 +1097,13 @@ def browser_control(
                 _log(player, result)
                 return result
 
-        # 4. Scroll, keys, and browser shortcuts
+        # 4. Scroll, keys, and browser shortcuts (including YouTube controls)
+        # These use native OS input on the active browser window — NO Playwright automation session.
         if action in (
             "scroll", "press", "reload", "back", "forward", "new_tab", "close_tab",
             "next_tab", "prev_tab", "reopen_tab", "address_bar", "search_bar",
-            "zoom_in", "zoom_out", "zoom_reset", "fullscreen", "search", "youtube_search", "switch_browser", "find"
+            "zoom_in", "zoom_out", "zoom_reset", "fullscreen", "search", "youtube_search", "switch_browser", "find",
+            "hotkey", "youtube_speed", "youtube_control"
         ):
             # Focus open browser window before sending native keys / scrolls
             if action not in ("search", "youtube_search"):
@@ -1128,6 +1190,59 @@ def browser_control(
                     elif action == "fullscreen":
                         pyautogui.press("f11")
                         result = "Toggled fullscreen."
+                    elif action == "hotkey":
+                        keys = params.get("keys", "").split("+")
+                        keys = [k.strip().lower() for k in keys if k.strip()]
+                        if keys:
+                            pyautogui.hotkey(*keys)
+                            result = f"Hotkey: {'+'.join(keys)}"
+                        else:
+                            result = "No keys specified for hotkey."
+                    elif action == "youtube_speed":
+                        direction = params.get("direction", "up").lower().strip()
+                        if direction == "up":
+                            pyautogui.hotkey("shift", ".")
+                        elif direction == "down":
+                            pyautogui.hotkey("shift", ",")
+                        elif direction == "normal":
+                            pyautogui.hotkey("shift", "/")
+                        else:
+                            result = f"Unknown direction: {direction}. Use 'up', 'down', or 'normal'."
+                            _log(player, result)
+                            return result
+                        result = f"YouTube speed {direction}."
+                    elif action == "youtube_control":
+                        yt_action = params.get("yt_action", "").lower().strip()
+                        key_map = {
+                            "play_pause": "k",
+                            "pause": "k",
+                            "play": "k",
+                            "next": "shift+n",
+                            "prev": "shift+p",
+                            "fullscreen": "f",
+                            "theater": "t",
+                            "mini": "i",
+                            "captions": "c",
+                            "mute": "m",
+                            "volume_up": "up",
+                            "volume_down": "down",
+                            "seek_forward": "l",
+                            "seek_back": "j",
+                            "restart": "0",
+                            "speed_up": "shift+.",
+                            "speed_down": "shift+,",
+                            "speed_normal": "shift+/",
+                        }
+                        key = key_map.get(yt_action)
+                        if not key:
+                            result = f"Unknown YouTube action: {yt_action}. Available: {', '.join(key_map.keys())}"
+                            _log(player, result)
+                            return result
+                        if "+" in key:
+                            pyautogui.hotkey(*key.split("+"))
+                        else:
+                            pyautogui.press(key)
+                        result = f"YouTube: {yt_action}"
                     elif action in ("search", "youtube_search"):
                         q = params.get("query") or params.get("text") or ""
                         engine = params.get("engine", "google").lower().strip()
@@ -1200,8 +1315,6 @@ def browser_control(
         elif action == "type":
             result = sess.run(sess.type_text(
                 params.get("selector"), params.get("text", ""), params.get("clear_first", True)))
-        elif action == "scroll":
-            result = sess.run(sess.scroll(params.get("direction", "down"), int(params.get("amount", 500))))
         elif action == "fill_form":
             result = sess.run(sess.fill_form(params.get("fields", {})))
         elif action == "smart_click":
@@ -1212,12 +1325,10 @@ def browser_control(
             result = sess.run(sess.get_text())
         elif action == "get_url":
             result = sess.run(sess.get_url())
-        elif action == "press":
-            result = sess.run(sess.press(params.get("key", "Enter")))
-        elif action == "close_tab":
-            result = sess.run(sess.close_tab())
         elif action == "screenshot":
             result = sess.run(sess.screenshot(params.get("path")))
+        elif action == "close_tab":
+            result = sess.run(sess.close_tab())
         elif action == "back":
             result = sess.run(sess.back())
         elif action == "forward":
@@ -1246,13 +1357,13 @@ def _log(player, text: str):
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "browser_control",
-    "description": "Controls web browsers and active web pages. Use for: opening websites, navigating, searching, scrolling, clicking elements, and filling forms. For user profiles (e.g. GitHub profile), use action='go_to' with the URL directly (e.g. 'https://github.com/Mahbub0001'). Navigating, scrolling, and clicking seamlessly act on the user's active browser without launching separate guest sessions.",
+    "description": "Controls web browsers and active web pages. Use for: opening websites, navigating, searching, scrolling, clicking elements, filling forms, YouTube playback control (speed, play/pause, fullscreen, theater mode, captions), and keyboard shortcuts. For user profiles (e.g. GitHub profile), use action='go_to' with the URL directly (e.g. 'https://github.com/Mahbub0001'). Navigating, scrolling, and clicking seamlessly act on the user's active browser without launching separate guest sessions.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
+                "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | hotkey | youtube_speed | youtube_control | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
             },
             "browser": {
                 "type": "STRING",
@@ -1284,7 +1395,7 @@ TOOL = {
             },
             "direction": {
                 "type": "STRING",
-                "description": "up | down for scroll"
+                "description": "up | down for scroll or youtube_speed direction"
             },
             "amount": {
                 "type": "INTEGER",
@@ -1293,6 +1404,10 @@ TOOL = {
             "key": {
                 "type": "STRING",
                 "description": "Key name for press action (e.g. Enter, Escape, F5)"
+            },
+            "keys": {
+                "type": "STRING",
+                "description": "Key combination for hotkey action, e.g. 'ctrl+shift+t' or 'ctrl+alt+delete'"
             },
             "path": {
                 "type": "STRING",
@@ -1305,6 +1420,10 @@ TOOL = {
             "clear_first": {
                 "type": "BOOLEAN",
                 "description": "Clear field before typing (default: true)"
+            },
+            "yt_action": {
+                "type": "STRING",
+                "description": "YouTube control action: play_pause | next | prev | fullscreen | theater | mini | captions | mute | volume_up | volume_down | seek_forward | seek_back | restart | speed_up | speed_down | speed_normal"
             }
         },
         "required": [
