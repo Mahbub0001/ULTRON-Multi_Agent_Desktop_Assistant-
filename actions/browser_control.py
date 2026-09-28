@@ -1014,12 +1014,27 @@ def browser_control(
 
     if action == "close_all":
         result = _registry.close_all()
+        # Also close native browser window if any was open
+        try:
+            from actions.computer_control import _close_window
+            for b in ("Google Chrome", "Chrome", "Microsoft Edge", "Edge", "Firefox", "Opera", "Brave"):
+                _close_window(b)
+        except Exception:
+            pass
         _log(player, result)
         return result
 
     if action == "close":
         target = browser or _registry._active_browser
-        result = _registry.close_one(target) if target else "No browser specified."
+        result = _registry.close_one(target) if (target and _registry.has(target)) else ""
+        try:
+            from actions.computer_control import _close_window
+            b_name = target or "Chrome"
+            res_close = _close_window(b_name)
+            result = f"{result}. {res_close}".strip(". ") if result else res_close
+        except Exception as e:
+            if not result:
+                result = f"Could not close browser: {e}"
         _log(player, result)
         return result
 
@@ -1053,6 +1068,39 @@ def browser_control(
             nav_url = base + params.get("query", "").replace(" ", "+")
         else:
             nav_url = params.get("url", "").strip()
+
+        # If user did NOT explicitly request a new tab, check if a browser window is already open.
+        # If open, navigate in the CURRENT ACTIVE TAB via address bar (Ctrl + L) to avoid cluttering new tabs!
+        new_tab = bool(params.get("new_tab", False))
+        if nav_url and not new_tab and action == "go_to":
+            try:
+                import pyautogui
+                from actions.computer_control import _focus_window, _active_window
+                cur_title = _active_window().lower()
+                browser_kw = ("chrome", "edge", "firefox", "brave", "opera", "linkedin", "youtube", "browser")
+                is_browser_active = any(k in cur_title for k in browser_kw)
+                if not is_browser_active:
+                    for b in ("Google Chrome", "Chrome", "Microsoft Edge", "Edge", "Brave", "Firefox", "Opera"):
+                        if "Focused window:" in _focus_window(b):
+                            is_browser_active = True
+                            time.sleep(0.15)
+                            break
+                if is_browser_active:
+                    import pyperclip
+                    pyautogui.hotkey("ctrl", "l")
+                    time.sleep(0.1)
+                    pyperclip.copy(nav_url)
+                    time.sleep(0.05)
+                    pyautogui.hotkey("ctrl", "v")
+                    time.sleep(0.05)
+                    pyautogui.press("enter")
+                    time.sleep(0.15)
+                    result = f"Navigated in active tab: {nav_url}"
+                    _registry.note_native_url(_normalize_url(nav_url))
+                    _log(player, result)
+                    return result
+            except Exception as e:
+                print(f"[Browser] In-tab navigation fallback to native open: {e}")
 
         result = _open_native(nav_url, browser)
         if result.startswith("Opened") and nav_url:
@@ -1105,15 +1153,18 @@ def browser_control(
             "zoom_in", "zoom_out", "zoom_reset", "fullscreen", "search", "youtube_search", "switch_browser", "find",
             "hotkey", "youtube_speed", "youtube_control"
         ):
-            # Focus open browser window before sending native keys / scrolls
+            # Focus open browser window before sending native keys / scrolls only if not already active
             if action not in ("search", "youtube_search"):
                 try:
-                    from actions.computer_control import _focus_window
-                    for b in ("Google Chrome", "Chrome", "YouTube", "Microsoft Edge", "Edge", "Brave", "Firefox", "Opera"):
-                        res = _focus_window(b)
-                        if "Focused window:" in res:
-                            time.sleep(0.15)
-                            break
+                    from actions.computer_control import _focus_window, _active_window
+                    cur_win = _active_window().lower()
+                    browser_kw = ("chrome", "edge", "firefox", "brave", "opera", "youtube", "linkedin", "browser")
+                    if not any(k in cur_win for k in browser_kw):
+                        for b in ("Google Chrome", "Chrome", "YouTube", "Microsoft Edge", "Edge", "Brave", "Firefox", "Opera"):
+                            res = _focus_window(b)
+                            if "Focused window:" in res:
+                                time.sleep(0.1)
+                                break
                 except Exception:
                     pass
 
@@ -1126,6 +1177,12 @@ def browser_control(
                         direction = params.get("direction", "down").lower().strip()
                         amount    = int(params.get("amount", 500))
                         clicks    = -amount if direction == "down" else amount
+                        # Ensure mouse cursor is in the viewport center, not on the titlebar or minimize icon
+                        sw, sh = pyautogui.size()
+                        cx, cy = pyautogui.position()
+                        if cy < 120 or cy > sh - 60 or cx < 60 or cx > sw - 60:
+                            pyautogui.moveTo(sw // 2, sh // 2)
+                            time.sleep(0.05)
                         pyautogui.scroll(clicks)
                         result = f"Scrolled {direction}."
                     elif action == "press":

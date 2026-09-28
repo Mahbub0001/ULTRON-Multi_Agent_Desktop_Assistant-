@@ -279,11 +279,30 @@ def _focus_window(title: str) -> str:
             win32gui.EnumWindows(_enum_cb, None)
             if matched_hwnd:
                 try:
-                    win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
-                    win32gui.SetForegroundWindow(matched_hwnd)
+                    if win32gui.IsIconic(matched_hwnd):
+                        # Only restore if actually minimized; SW_RESTORE on a maximized window un-maximizes it!
+                        win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
+                    else:
+                        win32gui.ShowWindow(matched_hwnd, win32con.SW_SHOW)
+
+                    try:
+                        import win32process
+                        import win32api
+                        cur_tid = win32api.GetCurrentThreadId()
+                        win_tid, _ = win32process.GetWindowThreadProcessId(matched_hwnd)
+                        if cur_tid != win_tid:
+                            win32process.AttachThreadInput(cur_tid, win_tid, True)
+                            win32gui.SetForegroundWindow(matched_hwnd)
+                            win32gui.BringWindowToTop(matched_hwnd)
+                            win32process.AttachThreadInput(cur_tid, win_tid, False)
+                        else:
+                            win32gui.SetForegroundWindow(matched_hwnd)
+                            win32gui.BringWindowToTop(matched_hwnd)
+                    except Exception:
+                        win32gui.SetForegroundWindow(matched_hwnd)
                 except Exception:
                     pass
-                time.sleep(0.2)
+                time.sleep(0.15)
                 return f"Focused window: {title}"
         except Exception:
             pass

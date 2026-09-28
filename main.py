@@ -1122,7 +1122,7 @@ class JarvisLive:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
                 id=fc.id, name=name,
-                response={"result": "ok", "silent": True}
+                response={"result": f"Saved {category}/{key}: {value} to long-term memory.", "silent": True}
             )
 
         loop   = asyncio.get_event_loop()

@@ -324,6 +324,81 @@ def format_memory_for_prompt(memory: dict | None) -> str:
     return "\n".join(out) + "\n"
 
 
+# ── Multilingual query expansion for recall ──────────────────────────────────
+_SYNONYM_GROUPS: dict[str, list[str]] = {
+    "mother": [
+        "ammu", "amma", "ammur", "ammar", "ma", "maa", "mar",
+        "mom", "mother", "mom's", "mother's", "matri", "mata",
+        "আম্মু", "আম্মুর", "আম্মা", "আম্মার", "মা", "মার", "মাতা", "মাতৃ",
+        "अम्मी", "माँ", "माता", "अम्मीका"
+    ],
+    "father": [
+        "baba", "abbu", "abba", "babar", "abbur", "abbar",
+        "dad", "father", "dad's", "father's", "pitri", "pita",
+        "বাবা", "বাবার", "আব্বু", "আব্বুর", "আব্বা", "আব্ব্বার", "পিতা", "পিতৃ",
+        "अब्बा", "पिता", "पापा", "बापू", "पिताजी", "बाबा"
+    ],
+    "job": [
+        "job", "work", "profession", "occupation", "career", "employment", "works", "worker", "post", "role",
+        "pesha", "chakri", "kormokorta", "koren", "korchen", "chakuri", "chakrite", "peshay",
+        "পেশা", "চাকরি", "কর্মকর্তা", "কাজ", "কর্ম", "চাকুরে", "চাকরী",
+        "पेशा", "नौकरी", "काम", "कार्यकर्ता", "व्यवसाय"
+    ],
+    "brother": [
+        "brother", "bro", "bhai", "vai", "bhaiya", "vaiya",
+        "ভাই", "ভাইয়া", "ভাইয়ের", "ভ্রাতা",
+        "भाई", "भैया"
+    ],
+    "sister": [
+        "sister", "sis", "bon", "apu", "api", "boner", "apur",
+        "বোন", "আপু", "আপি", "বোনের", "ভগিনী",
+        "बहन", "दीदी"
+    ],
+    "wife": [
+        "wife", "spouse", "partner", "bou", "stree",
+        "বউ", "স্ত্রী", "ওয়াইফ", "সহধর্মিনী",
+        "पत्नी", "बीवी"
+    ],
+    "husband": [
+        "husband", "shami", "pati",
+        "স্বামী", "পতি",
+        "पति", "शौहर"
+    ],
+    "son": [
+        "son", "child", "kid", "chele", "putro", "cheler",
+        "ছেলে", "পুত্র", "সন্তান",
+        "बेटा", "पुत्र"
+    ],
+    "daughter": [
+        "daughter", "konna", "meye", "meyer",
+        "মেয়ে", "কন্যা",
+        "बेटी", "पुत्री"
+    ],
+    "name": [
+        "name", "named", "names", "nam", "naam", "namti", "namta",
+        "নাম", "নামটি", "নামটা",
+        "नाम"
+    ],
+    "city": [
+        "city", "town", "location", "place", "bari", "thake", "basha", "desh",
+        "বাড়ি", "বাসা", "শহর", "দেশ", "থাকেন", "থাকা",
+        "शहर", "घर", "रहते"
+    ],
+}
+
+
+def _expand_query_words(words: list[str]) -> list[str]:
+    expanded = set(words)
+    for w in words:
+        for canonical, syns in _SYNONYM_GROUPS.items():
+            if w == canonical or w in syns or any(s in w for s in syns if len(s) >= 3):
+                expanded.add(canonical)
+                for s in syns:
+                    if len(s) >= 3:
+                        expanded.add(s)
+    return list(expanded)
+
+
 # ── Recall ────────────────────────────────────────────────────────────────────
 
 def _score(query_words: list[str], cat: str, key: str, value: str) -> int:
@@ -353,7 +428,8 @@ def search_memory(query: str, limit: int = 8) -> str:
     An empty query is treated as "show me everything you know", capped - the
     model asks that when the user says "what do you remember about me?"."""
     memory = load_memory()
-    words  = [w for w in re.split(r"[^\w]+", (query or "").lower()) if len(w) > 1]
+    raw_words = [w for w in re.findall(r"[\w\u0980-\u09FF\u0900-\u097F]+", (query or "").lower()) if len(w) > 1]
+    words  = _expand_query_words(raw_words)
 
     rows: list[tuple[int, str, str, str]] = []
     for cat, items in memory.items():
