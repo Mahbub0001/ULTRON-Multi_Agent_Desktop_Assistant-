@@ -92,6 +92,19 @@ class TestAgentTownDeveloper(unittest.TestCase):
         self.assertIn("Exit Code: 0", res)
         self.assertIn("core", res.lower())
 
+    def test_dispatch_task_loop_exhaustion_marks_error(self):
+        from unittest.mock import patch
+        from core.agent_town import AgentState
+
+        # Mock gemini.text to return an empty response so no final answer is produced
+        with patch("core.gemini.text", return_value=""):
+            self.mgr.dispatch_task("Bob", "Do something that produces no output", async_exec=False)
+            agent = self.mgr.get_agent("Bob")
+            self.assertNotEqual(agent.state, AgentState.COMPLETED)
+            self.assertEqual(agent.state, AgentState.ERROR)
+            self.assertIn("incomplete", agent.latest_result.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
+

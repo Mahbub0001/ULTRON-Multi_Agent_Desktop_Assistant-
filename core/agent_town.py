@@ -543,11 +543,13 @@ class AgentTownManager:
 
                 tool_definitions = (
                     "Available Tools:\n"
+                    "- search_code(query: str, path: str = '.', file_pattern: str = '') [Recursive grep search across project files with line numbers]\n"
+                    "- read_file(path: str, start_line: int = 1, end_line: int = -1) [Reads lines with line numbers. Use start_line/end_line for large files]\n"
+                    "- edit_file(path: str, target: str, replacement: str) [Surgically replaces unique target block in file with replacement. Validates Python syntax]\n"
+                    "- run_command(command: str, cwd: str = '.') [Executes shell/PowerShell command in project workspace]\n"
+                    "- write_file(path: str, content: str) [Creates new file or completely writes file]\n"
+                    "- list_files(directory: str) [Lists directory contents]\n"
                     "- web_search(query: str, mode: 'search'|'news'|'research')\n"
-                    "- write_file(path: str, content: str)  [Default base: Desktop/JarvisProjects/]\n"
-                    "- read_file(path: str)\n"
-                    "- run_command(command: str)\n"
-                    "- list_files(directory: str)\n"
                     "- create_word_document(title: str, content: str, path: str)\n"
                     "- delegate_subtask(target_agent: 'Alice'|'Bob'|'Carol'|'Dave', subtask: str)\n\n"
                     "Protocol:\n"
@@ -559,11 +561,11 @@ class AgentTownManager:
                     '  "arguments": {"arg": "value"}\n'
                     "}\n"
                     "```\n"
-                    "When you have completed all necessary actions and have your final output ready, output:\n"
+                    "When you have completed all necessary actions, verified your work with tests/commands, and have your final output ready, output:\n"
                     "```json\n"
                     "{\n"
-                    '  "thought": "I have completed all required actions.",\n'
-                    '  "final_answer": "Your comprehensive, detailed, polished final response for the user"\n'
+                    '  "thought": "I have verified my changes and completed all required actions.",\n'
+                    '  "final_answer": "Your comprehensive, detailed, polished final response for the user with evidence and diffs"\n'
                     "}\n"
                     "```"
                 )
@@ -573,7 +575,7 @@ class AgentTownManager:
                 ]
 
                 final_answer = ""
-                max_iterations = 4
+                max_iterations = 10 if agent.id.lower() == "bob" else 6
 
                 for iteration in range(max_iterations):
                     prompt = (
@@ -633,19 +635,29 @@ class AgentTownManager:
                     break
 
                 if not final_answer:
-                    final_answer = "Task completed with observations."
-
-                agent.state = AgentState.COMPLETED
-                agent.status_message = "Task finished successfully."
-                agent.latest_result = final_answer
-                agent.history.append({
-                    "task": task,
-                    "result": final_answer,
-                    "steps": steps_taken,
-                    "timestamp": time.time(),
-                    "status": "success"
-                })
-                self._save_memory()
+                    agent.state = AgentState.ERROR
+                    agent.status_message = f"Task incomplete: reached step limit ({max_iterations}) without final answer."
+                    agent.latest_result = f"Task incomplete: Reached step limit ({max_iterations}) without producing a verified final answer. Steps recorded: {len(steps_taken)}."
+                    agent.history.append({
+                        "task": task,
+                        "result": agent.latest_result,
+                        "steps": steps_taken,
+                        "timestamp": time.time(),
+                        "status": "incomplete"
+                    })
+                    self._save_memory()
+                else:
+                    agent.state = AgentState.COMPLETED
+                    agent.status_message = "Task finished successfully."
+                    agent.latest_result = final_answer
+                    agent.history.append({
+                        "task": task,
+                        "result": final_answer,
+                        "steps": steps_taken,
+                        "timestamp": time.time(),
+                        "status": "success"
+                    })
+                    self._save_memory()
 
             except Exception as ex:
                 logger.error("Error executing task for %s: %s", agent.name, ex)
