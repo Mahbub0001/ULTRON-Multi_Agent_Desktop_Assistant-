@@ -1,0 +1,459 @@
+syntax = "proto3";
+
+package hcs.agent.v1;
+
+option rust_module = "hcs_agent_proto";
+
+// ============================================
+// Input Events
+// ============================================
+
+message KeyEvent {
+    uint32 code = 1;
+    KeyState state = 2;
+    uint32 scan_code = 3;
+    bool extended = 4;
+    uint64 timestamp_us = 5;
+}
+
+enum KeyState {
+    KEY_STATE_UNSPECIFIED = 0;
+    KEY_STATE_DOWN = 1;
+    KEY_STATE_UP = 2;
+}
+
+message MouseEvent {
+    int32 x = 1;
+    int32 y = 2;
+    int32 dx = 3;
+    int32 dy = 4;
+    MouseButton button = 5;
+    KeyState button_state = 6;
+    bool absolute = 7;
+    uint64 timestamp_us = 8;
+}
+
+enum MouseButton {
+    MOUSE_BUTTON_UNSPECIFIED = 0;
+    MOUSE_BUTTON_LEFT = 1;
+    MOUSE_BUTTON_RIGHT = 2;
+    MOUSE_BUTTON_MIDDLE = 3;
+    MOUSE_BUTTON_X1 = 4;
+    MOUSE_BUTTON_X2 = 5;
+    MOUSE_BUTTON_WHEEL_UP = 6;
+    MOUSE_BUTTON_WHEEL_DOWN = 7;
+    MOUSE_BUTTON_WHEEL_LEFT = 8;
+    MOUSE_BUTTON_WHEEL_RIGHT = 9;
+}
+
+message InputEvent {
+    oneof event {
+        KeyEvent key = 1;
+        MouseEvent mouse = 2;
+        DelayEvent delay = 3;
+    }
+}
+
+message DelayEvent {
+    uint64 microseconds = 1;
+}
+
+message InputBatch {
+    repeated InputEvent events = 1;
+}
+
+// ============================================
+// Device Info
+// ============================================
+
+message DeviceInfo {
+    string id = 1;
+    string name = 2;
+    DeviceType type = 3;
+    uint32 vendor_id = 4;
+    uint32 product_id = 5;
+    bool is_keyboard = 6;
+    bool is_mouse = 7;
+    bool is_touch = 8;
+}
+
+enum DeviceType {
+    DEVICE_TYPE_UNSPECIFIED = 0;
+    DEVICE_TYPE_KEYBOARD = 1;
+    DEVICE_TYPE_MOUSE = 2;
+    DEVICE_TYPE_TOUCHSCREEN = 3;
+    DEVICE_TYPE_GAMEPAD = 4;
+    DEVICE_TYPE_TABLET = 5;
+    DEVICE_TYPE_UNKNOWN = 6;
+}
+
+// ============================================
+// Driver Config
+// ============================================
+
+message DriverConfig {
+    BackendType backend = 1;
+    bool exclusive_mode = 2;
+    uint64 injection_delay_us = 3;
+    uint32 max_batch_size = 4;
+    DeviceFilter device_filter = 5;
+}
+
+enum BackendType {
+    BACKEND_TYPE_UNSPECIFIED = 0;
+    BACKEND_TYPE_AUTO = 1;
+    BACKEND_TYPE_INTERCEPTION = 2;
+    BACKEND_TYPE_UINPUT = 3;
+    BACKEND_TYPE_HID = 4;
+    BACKEND_TYPE_SYNTHETIC = 5;
+}
+
+message DeviceFilter {
+    repeated uint32 vendor_ids = 1;
+    repeated uint32 product_ids = 2;
+    repeated string device_names = 3;
+}
+
+// ============================================
+// Capabilities & Auth
+// ============================================
+
+message Capability {
+    string resource = 1;
+    repeated Action actions = 2;
+    map<string, string> constraints = 3;
+}
+
+enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_READ = 1;
+    ACTION_WRITE = 2;
+    ACTION_EXECUTE = 3;
+    ACTION_ADMIN = 4;
+}
+
+message TokenRequest {
+    string client_id = 1;
+    repeated Capability capabilities = 2;
+    uint64 ttl_seconds = 3;
+}
+
+message TokenResponse {
+    string token = 1;
+    uint64 expires_at = 2;
+    repeated Capability capabilities = 3;
+}
+
+message TokenValidationRequest {
+    string token = 1;
+    string required_resource = 2;
+    Action required_action = 3;
+}
+
+message TokenValidationResponse {
+    bool valid = 1;
+    string client_id = 2;
+    repeated Capability capabilities = 3;
+}
+
+// ============================================
+// Task Execution
+// ============================================
+
+message TaskRequest {
+    string task_id = 1;
+    string task_type = 2;
+    google.protobuf.Struct parameters = 3;
+    uint32 priority = 4;
+    uint64 timeout_ms = 5;
+}
+
+message TaskResponse {
+    string task_id = 1;
+    TaskStatus status = 2;
+    google.protobuf.Struct result = 3;
+    string error = 4;
+    uint64 started_at = 5;
+    uint64 completed_at = 6;
+}
+
+enum TaskStatus {
+    TASK_STATUS_UNSPECIFIED = 0;
+    TASK_STATUS_PENDING = 1;
+    TASK_STATUS_RUNNING = 2;
+    TASK_STATUS_COMPLETED = 3;
+    TASK_STATUS_FAILED = 4;
+    TASK_STATUS_CANCELLED = 5;
+}
+
+message TaskStreamRequest {
+    string task_id = 1;
+}
+
+message TaskStreamResponse {
+    string task_id = 1;
+    TaskStatus status = 2;
+    google.protobuf.Struct progress = 3;
+    string log = 4;
+}
+
+// ============================================
+// Macros
+// ============================================
+
+message MacroRequest {
+    string name = 1;
+    google.protobuf.Struct parameters = 2;
+    uint32 variance_ms = 3;
+}
+
+message MacroResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+// ============================================
+// System Info
+// ============================================
+
+message SystemInfo {
+    string hostname = 1;
+    string os = 2;
+    string arch = 3;
+    uint64 uptime_seconds = 4;
+    CpuInfo cpu = 5;
+    MemoryInfo memory = 6;
+    repeated GpuInfo gpus = 7;
+    DriverInfo driver = 8;
+}
+
+message CpuInfo {
+    string brand = 1;
+    uint32 cores = 2;
+    uint32 threads = 3;
+    double usage_percent = 4;
+}
+
+message MemoryInfo {
+    uint64 total_bytes = 1;
+    uint64 available_bytes = 2;
+    uint64 used_bytes = 3;
+}
+
+message GpuInfo {
+    string name = 1;
+    uint64 memory_bytes = 2;
+    double usage_percent = 3;
+    string driver_version = 4;
+}
+
+message DriverInfo {
+    BackendType backend = 1;
+    bool initialized = 2;
+    bool ready = 3;
+    repeated DeviceInfo devices = 4;
+    ControllerStats stats = 5;
+}
+
+message ControllerStats {
+    uint64 events_injected = 1;
+    uint64 events_failed = 2;
+    uint64 avg_latency_us = 3;
+    string last_error = 4;
+}
+
+// ============================================
+// Health
+// ============================================
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+    ServingStatus status = 1;
+    string version = 2;
+    uint64 uptime_seconds = 3;
+    map<string, ComponentHealth> components = 4;
+}
+
+enum ServingStatus {
+    SERVING_STATUS_UNSPECIFIED = 0;
+    SERVING_STATUS_SERVING = 1;
+    SERVING_STATUS_NOT_SERVING = 2;
+    SERVING_STATUS_STARTING = 3;
+    SERVING_STATUS_STOPPING = 4;
+}
+
+message ComponentHealth {
+    ComponentStatus status = 1;
+    string message = 2;
+    map<string, string> details = 3;
+}
+
+enum ComponentStatus {
+    COMPONENT_STATUS_UNSPECIFIED = 0;
+    COMPONENT_STATUS_HEALTHY = 1;
+    COMPONENT_STATUS_DEGRADED = 2;
+    COMPONENT_STATUS_UNHEALTHY = 3;
+}
+
+// ============================================
+// Services
+// ============================================
+
+service InputService {
+    // Inject single keyboard event
+    rpc InjectKey(KeyEvent) returns (google.protobuf.Empty);
+    
+    // Inject single mouse event
+    rpc InjectMouse(MouseEvent) returns (google.protobuf.Empty);
+    
+    // Inject batch of events atomically
+    rpc InjectBatch(InputBatch) returns (google.protobuf.Empty);
+    
+    // Stream events for low-latency injection
+    rpc InjectStream(stream InputEvent) returns (google.protobuf.Empty);
+    
+    // Get available input devices
+    rpc ListDevices(google.protobuf.Empty) returns (DeviceList);
+    
+    // Configure driver
+    rpc ConfigureDriver(DriverConfig) returns (google.protobuf.Empty);
+    
+    // Get driver info
+    rpc GetDriverInfo(google.protobuf.Empty) returns (DriverInfo);
+}
+
+message DeviceList {
+    repeated DeviceInfo devices = 1;
+}
+
+service MacroService {
+    // Execute predefined macro
+    rpc ExecuteMacro(MacroRequest) returns (MacroResponse);
+    
+    // List available macros
+    rpc ListMacros(google.protobuf.Empty) returns (MacroList);
+    
+    // Register custom macro
+    rpc RegisterMacro(MacroDefinition) returns (google.protobuf.Empty);
+    
+    // Unregister macro
+    rpc UnregisterMacro(MacroName) returns (google.protobuf.Empty);
+}
+
+message MacroList {
+    repeated MacroInfo macros = 1;
+}
+
+message MacroInfo {
+    string name = 1;
+    string description = 2;
+    MacroParameterSchema schema = 3;
+}
+
+message MacroName {
+    string name = 1;
+}
+
+message MacroDefinition {
+    string name = 1;
+    string description = 2;
+    MacroParameterSchema schema = 3;
+    repeated InputEvent events = 4;
+}
+
+message MacroParameterSchema {
+    map<string, ParameterInfo> parameters = 1;
+}
+
+message ParameterInfo {
+    string type = 1;
+    string description = 2;
+    bool required = 3;
+    google.protobuf.Value default = 4;
+}
+
+service TaskService {
+    // Submit task for execution
+    rpc SubmitTask(TaskRequest) returns (TaskResponse);
+    
+    // Get task status
+    rpc GetTaskStatus(TaskId) returns (TaskResponse);
+    
+    // Cancel task
+    rpc CancelTask(TaskId) returns (google.protobuf.Empty);
+    
+    // Stream task progress
+    rpc StreamTask(TaskStreamRequest) returns (stream TaskStreamResponse);
+    
+    // List tasks
+    rpc ListTasks(TaskFilter) returns (TaskList);
+}
+
+message TaskId {
+    string task_id = 1;
+}
+
+message TaskFilter {
+    repeated TaskStatus statuses = 1;
+    repeated string types = 2;
+    uint32 limit = 3;
+    uint32 offset = 4;
+}
+
+message TaskList {
+    repeated TaskResponse tasks = 1;
+    uint32 total = 2;
+}
+
+service AuthService {
+    // Issue capability token
+    rpc IssueToken(TokenRequest) returns (TokenResponse);
+    
+    // Validate token
+    rpc ValidateToken(TokenValidationRequest) returns (TokenValidationResponse);
+    
+    // Revoke token
+    rpc RevokeToken(TokenId) returns (google.protobuf.Empty);
+    
+    // List active tokens (admin)
+    rpc ListTokens(google.protobuf.Empty) returns (TokenList);
+}
+
+message TokenId {
+    string token_id = 1;
+}
+
+message TokenList {
+    repeated TokenInfo tokens = 1;
+}
+
+message TokenInfo {
+    string token_id = 1;
+    string client_id = 2;
+    uint64 issued_at = 3;
+    uint64 expires_at = 4;
+    repeated Capability capabilities = 5;
+    bool revoked = 6;
+}
+
+service SystemService {
+    // Health check
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+    
+    // Get system info
+    rpc GetSystemInfo(google.protobuf.Empty) returns (SystemInfo);
+    
+    // Get metrics (Prometheus format)
+    rpc GetMetrics(google.protobuf.Empty) returns (MetricsResponse);
+    
+    // Shutdown agent
+    rpc Shutdown(google.protobuf.Empty) returns (google.protobuf.Empty);
+    
+    // Reload config
+    rpc ReloadConfig(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+message MetricsResponse {
+    string metrics = 1;
+}

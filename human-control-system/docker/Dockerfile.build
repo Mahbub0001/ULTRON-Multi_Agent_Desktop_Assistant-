@@ -1,0 +1,98 @@
+# Multi-stage build for reproducible builds
+FROM rust:1.78-bookworm AS rust-builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
+    lld \
+    llvm \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo tools
+RUN cargo install --locked cargo-audit cargo-deny cargo-hack cargo-nextest cargo-tarpaulin
+
+WORKDIR /workspace
+COPY Cargo.toml Cargo.lock ./
+COPY driver/Cargo.toml driver/
+COPY agent/Cargo.toml agent/
+COPY brain/Cargo.toml brain/
+COPY orchestrator/Cargo.toml orchestrator/
+COPY adapters/Cargo.toml adapters/
+
+# Pre-fetch dependencies
+RUN cargo fetch --locked
+
+# Copy source and build
+COPY . .
+RUN cargo build --release --locked --workspace --exclude vision --exclude hardware
+
+# ============================================
+# Python Vision Builder
+# ============================================
+FROM python:3.11-slim-bookworm AS vision-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/vision
+COPY vision/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY vision/ .
+RUN python -m compileall .
+
+# ============================================
+# Hardware Firmware Builder
+# ============================================
+FROM gcc-arm-none-eabi:13.2 AS hardware-builder
+
+WORKDIR /workspace/hardware
+COPY hardware/ .
+RUN make clean && make all
+
+# ============================================
+# Final Runtime Image
+# ============================================
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    libgcc-s1 \
+    libstdc++6 \
+    python3 \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Rust binaries
+COPY --from=rust-builder /workspace/target/release/hcs-agent /usr/local/bin/
+COPY --from=rust-builder /workspace/target/release/hcs-orchestrator /usr/local/bin/
+COPY --from=rust-builder /workspace/target/release/hcs-brain /usr/local/bin/
+COPY --from=rust-builder /workspace/target/release/hcs-adapters /usr/local/bin/
+
+# Copy vision
+COPY --from=vision-builder /workspace/vision /opt/hcs/vision
+COPY --from=vision-builder /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
+
+# Copy hardware firmware
+COPY --from=hardware-builder /workspace/hardware/build/*.hex /opt/hcs/firmware/
+
+# Config directory
+RUN mkdir -p /etc/hcs /var/lib/hcs /var/log/hcs
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["agent"]

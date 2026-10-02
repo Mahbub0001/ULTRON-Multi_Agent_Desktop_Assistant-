@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  # Main agent daemon - runs on host with privileged access
+  hcs-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build
+      target: runtime
+    container_name: hcs-agent
+    privileged: true
+    network_mode: host
+    pid: host
+    ipc: host
+    devices:
+      - /dev/uinput:/dev/uinput      # Linux uinput
+      - /dev/input:/dev/input        # Linux input devices
+      - /dev/hidraw:/dev/hidraw      # HID raw devices
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../data:/var/lib/hcs
+      - ../logs:/var/log/hcs
+      - /tmp/.X11-unix:/tmp/.X11-unix  # X11 for screen capture
+    environment:
+      - RUST_LOG=info,hcs_agent=debug
+      - HCS_CONFIG=/etc/hcs/agent.toml
+      - DISPLAY=${DISPLAY:-:0}
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - CAP_DAC_OVERRIDE
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+  # Vision inference server - GPU accelerated
+  hcs-vision:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.vision
+    container_name: hcs-vision
+    runtime: nvidia
+    gpus: all
+    network_mode: host
+    ipc: host
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../models:/opt/hcs/models:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=0
+      - ORT_TENSORRT_ENGINE_CACHE_ENABLE=1
+      - HCS_VISION_CONFIG=/etc/hcs/vision.toml
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 8G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, compute, utility]
+
+  # Brain/Decision engine
+  hcs-brain:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build
+      target: runtime
+    container_name: hcs-brain
+    network_mode: host
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../wasm-plugins:/opt/hcs/wasm-plugins:ro
+      - ../data:/var/lib/hcs
+    environment:
+      - RUST_LOG=info,hcs_brain=debug
+      - HCS_BRAIN_CONFIG=/etc/hcs/brain.toml
+    depends_on:
+      - hcs-vision
+    restart: unless-stopped
+
+  # Orchestrator CLI/TUI
+  hcs-orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build
+      target: runtime
+    container_name: hcs-orchestrator
+    network_mode: host
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../tasks:/opt/hcs/tasks:ro
+      - ../data:/var/lib/hcs
+      - ./orchestrator_history:/root/.hcs_history
+    environment:
+      - RUST_LOG=info
+      - HCS_ORCHESTRATOR_CONFIG=/etc/hcs/orchestrator.toml
+    entrypoint: ["hcs-orchestrator"]
+    profiles: ["cli"]
+
+  # Development environment with all tools
+  hcs-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    container_name: hcs-dev
+    privileged: true
+    network_mode: host
+    pid: host
+    ipc: host
+    devices:
+      - /dev/uinput:/dev/uinput
+      - /dev/input:/dev/input
+      - /dev/hidraw:/dev/hidraw
+    volumes:
+      - ..:/workspace:cached
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-target:/workspace/target
+    environment:
+      - RUST_LOG=debug
+      - DISPLAY=${DISPLAY:-:0}
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - CAP_DAC_OVERRIDE
+    command: sleep infinity
+
+volumes:
+  cargo-cache:
+  cargo-target:
+
+networks:
+  default:
+    name: hcs-network

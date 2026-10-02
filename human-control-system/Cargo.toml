@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "driver",
+    "agent",
+    "brain",
+    "orchestrator",
+    "adapters",
+]
+exclude = ["vision", "hardware", "tests", "docs", "docker"]
+
+[workspace.dependencies]
+# Core
+tokio = { version = "1.38", features = ["full", "tracing"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+bytes = "1.5"
+uuid = { version = "1.6", features = ["v4", "serde", "fast-rng"] }
+
+# gRPC/Networking
+tonic = "0.10"
+prost = "0.12"
+prost-types = "0.12"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors"] }
+hyper = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "gzip"] }
+
+# Windows/Linux specific
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_Security",
+], optional = true }
+nix = { version = "0.28", optional = true }
+
+# Async/Utils
+async-trait = "0.1"
+futures = "0.3"
+parking_lot = "0.12"
+dashmap = "5.5"
+crossbeam = "0.8"
+tokio-util = { version = "0.7", features = ["codec", "sync"] }
+
+# Serialization/Config
+toml = "0.8"
+config = { version = "0.14", features = ["toml", "env"] }
+clap = { version = "4.5", features = ["derive", "env", "yaml"] }
+
+# WASM
+wasmtime = { version = "25.0", features = ["component-model-async"] }
+wit-component = "0.22"
+
+# Crypto/Security
+ring = "0.17"
+zeroize = "1.6"
+secrecy = "0.10"
+
+# Testing
+proptest = "1.0"
+mockall = "0.12"
+
+[workspace.lints]
+rust.rust_2021_incompatible_closure_captures = "warn"
+rust.rust_2021_prefixes_conflicting_syntax = "warn"
+rust.rust_2021_prelude_collisions = "warn"
+rust.unused_lifetimes = "warn"
+rust.unused_imports = "warn"
+rust.unused_variables = "warn"

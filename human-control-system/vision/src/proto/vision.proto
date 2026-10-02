@@ -1,0 +1,288 @@
+syntax = "proto3";
+
+package hcs.vision.v1;
+
+option python_package = "hcs.vision.proto";
+
+// ============================================
+// Screen Capture
+// ============================================
+
+message MonitorInfo {
+    int32 index = 1;
+    string name = 2;
+    int32 x = 3;
+    int32 y = 4;
+    int32 width = 5;
+    int32 height = 6;
+    bool is_primary = 7;
+    double scale_factor = 8;
+}
+
+message Region {
+    int32 x = 1;
+    int32 y = 2;
+    int32 width = 3;
+    int32 height = 4;
+}
+
+message CaptureRequest {
+    int32 monitor_index = 1;
+    Region region = 2;
+    string window_title = 3;
+    bool include_cursor = 4;
+    ImageFormat format = 5;
+}
+
+enum ImageFormat {
+    IMAGE_FORMAT_UNSPECIFIED = 0;
+    IMAGE_FORMAT_BGR = 1;
+    IMAGE_FORMAT_RGB = 2;
+    IMAGE_FORMAT_RGBA = 3;
+    IMAGE_FORMAT_GRAY = 4;
+    IMAGE_FORMAT_JPEG = 5;
+    IMAGE_FORMAT_PNG = 6;
+}
+
+message CaptureResponse {
+    bytes image_data = 1;
+    int32 width = 2;
+    int32 height = 3;
+    int32 stride = 4;
+    ImageFormat format = 5;
+    uint64 timestamp_us = 6;
+    int32 monitor_index = 7;
+}
+
+message StreamFramesRequest {
+    int32 monitor_index = 1;
+    Region region = 2;
+    int32 target_fps = 3;
+    ImageFormat format = 4;
+    bool include_cursor = 5;
+}
+
+message FrameChunk {
+    bytes image_data = 1;
+    int32 width = 2;
+    int32 height = 3;
+    int32 stride = 4;
+    ImageFormat format = 5;
+    uint64 timestamp_us = 6;
+    int32 frame_number = 7;
+}
+
+// ============================================
+// Object Detection (YOLO)
+// ============================================
+
+message DetectionRequest {
+    bytes image_data = 1;
+    int32 width = 2;
+    int32 height = 3;
+    ImageFormat format = 4;
+    repeated string class_filter = 5;
+    float confidence_threshold = 6;
+    float iou_threshold = 7;
+    int32 max_detections = 8;
+}
+
+message BoundingBox {
+    float x = 1;
+    float y = 2;
+    float width = 3;
+    float height = 4;
+}
+
+message Detection {
+    string class_name = 1;
+    int32 class_id = 2;
+    float confidence = 3;
+    BoundingBox bbox = 4;
+    map<string, string> attributes = 5;
+}
+
+message DetectionResponse {
+    repeated Detection detections = 1;
+    uint64 inference_time_us = 2;
+    int32 image_width = 3;
+    int32 image_height = 4;
+}
+
+message BatchDetectionRequest {
+    repeated DetectionRequest requests = 1;
+}
+
+message BatchDetectionResponse {
+    repeated DetectionResponse responses = 1;
+    uint64 total_inference_time_us = 2;
+}
+
+// ============================================
+// OCR
+// ============================================
+
+message OcrRequest {
+    bytes image_data = 1;
+    int32 width = 2;
+    int32 height = 3;
+    ImageFormat format = 4;
+    Region region = 5;
+    repeated string languages = 6;
+    bool detect_orientation = 7;
+    float confidence_threshold = 8;
+}
+
+message TextBlock {
+    string text = 1;
+    float confidence = 2;
+    BoundingBox bbox = 3;
+    repeated Point polygon = 4;
+    string language = 5;
+}
+
+message Point {
+    float x = 1;
+    float y = 2;
+}
+
+message OcrResponse {
+    repeated TextBlock text_blocks = 1;
+    uint64 inference_time_us = 2;
+    int32 image_width = 3;
+    int32 image_height = 4;
+}
+
+// ============================================
+// Model Info
+// ============================================
+
+message ModelInfo {
+    string name = 1;
+    string version = 2;
+    string path = 3;
+    DeviceType device = 4;
+    bool loaded = 5;
+    map<string, string> metadata = 6;
+}
+
+enum DeviceType {
+    DEVICE_TYPE_UNSPECIFIED = 0;
+    DEVICE_TYPE_CPU = 1;
+    DEVICE_TYPE_CUDA = 2;
+    DEVICE_TYPE_TENSORRT = 3;
+    DEVICE_TYPE_COREML = 4;
+    DEVICE_TYPE_DIRECTML = 5;
+}
+
+// ============================================
+// Health & Config
+// ============================================
+
+message VisionConfig {
+    CaptureConfig capture = 1;
+    DetectionConfig detection = 2;
+    OcrConfig ocr = 3;
+}
+
+message CaptureConfig {
+    int32 default_fps = 1;
+    int32 default_monitor = 2;
+    int32 jpeg_quality = 3;
+    bool use_hardware_acceleration = 4;
+}
+
+message DetectionConfig {
+    string model_path = 1;
+    DeviceType device = 2;
+    int32 batch_size = 3;
+    float default_confidence = 4;
+    float default_iou = 5;
+    int32 input_width = 6;
+    int32 input_height = 7;
+    bool use_tensorrt = 8;
+    string tensorrt_cache_dir = 9;
+}
+
+message OcrConfig {
+    string engine = 1;  // "paddle" or "tesseract"
+    repeated string languages = 2;
+    string paddle_det_model_dir = 3;
+    string paddle_rec_model_dir = 4;
+    string paddle_cls_model_dir = 5;
+    bool use_gpu = 6;
+    int32 gpu_id = 7;
+    int32 cpu_threads = 8;
+    bool enable_mkldnn = 9;
+}
+
+// ============================================
+// Services
+// ============================================
+
+service VisionService {
+    // Screen capture
+    rpc CaptureScreen(CaptureRequest) returns (CaptureResponse);
+    rpc StreamFrames(StreamFramesRequest) returns (stream FrameChunk);
+    rpc ListMonitors(google.protobuf.Empty) returns (MonitorList);
+
+    // Object detection
+    rpc DetectObjects(DetectionRequest) returns (DetectionResponse);
+    rpc BatchDetectObjects(BatchDetectionRequest) returns (BatchDetectionResponse);
+
+    // OCR
+    rpc RecognizeText(OcrRequest) returns (OcrResponse);
+
+    // Model management
+    rpc GetModelInfo(google.protobuf.Empty) returns (ModelList);
+    rpc ReloadModels(ReloadModelsRequest) returns (google.protobuf.Empty);
+
+    // Health & Config
+    rpc HealthCheck(google.protobuf.Empty) returns (HealthCheckResponse);
+    rpc GetConfig(google.protobuf.Empty) returns (VisionConfig);
+    rpc UpdateConfig(VisionConfig) returns (google.protobuf.Empty);
+}
+
+message MonitorList {
+    repeated MonitorInfo monitors = 1;
+}
+
+message ModelList {
+    repeated ModelInfo models = 1;
+}
+
+message ReloadModelsRequest {
+    repeated string model_names = 1;
+}
+
+// ============================================
+// Health Check Types (aligned with agent)
+// ============================================
+
+message HealthCheckResponse {
+    ServingStatus status = 1;
+    string version = 2;
+    uint64 uptime_seconds = 3;
+    map<string, ComponentHealth> components = 4;
+}
+
+enum ServingStatus {
+    SERVING_STATUS_UNSPECIFIED = 0;
+    SERVING_STATUS_SERVING = 1;
+    SERVING_STATUS_NOT_SERVING = 2;
+    SERVING_STATUS_STARTING = 3;
+    SERVING_STATUS_STOPPING = 4;
+}
+
+message ComponentHealth {
+    ComponentStatus status = 1;
+    string message = 2;
+    map<string, string> details = 3;
+}
+
+enum ComponentStatus {
+    COMPONENT_STATUS_UNSPECIFIED = 0;
+    COMPONENT_STATUS_HEALTHY = 1;
+    COMPONENT_STATUS_DEGRADED = 2;
+    COMPONENT_STATUS_UNHEALTHY = 3;
+}

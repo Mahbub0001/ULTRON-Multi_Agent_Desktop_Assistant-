@@ -1,0 +1,100 @@
+# Development Dockerfile with all build tools
+FROM rust:1.78-bookworm AS dev-base
+
+# Install system dependencies for all components
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools
+    build-essential \
+    clang \
+    lld \
+    llvm \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    protobuf-compiler \
+    # Python for vision
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    # X11/Wayland for screen capture
+    libx11-dev \
+    libxext-dev \
+    libxfixes-dev \
+    libxdamage-dev \
+    libxcomposite-dev \
+    libxrandr-dev \
+    libxi-dev \
+    libxtst-dev \
+    libwayland-dev \
+    libwayland-client0 \
+    libwayland-egl1 \
+    libwayland-cursor0 \
+    # Graphics/Compute
+    mesa-common-dev \
+    libgl1-mesa-dev \
+    libegl1-mesa-dev \
+    libgles2-mesa-dev \
+    # Hardware/USB
+    libudev-dev \
+    libusb-1.0-0-dev \
+    # Audio (for potential future use)
+    libasound2-dev \
+    # Utilities
+    git \
+    curl \
+    wget \
+    vim \
+    htop \
+    netcat-openbsd \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust tools
+RUN rustup component add rustfmt clippy rust-src && \
+    cargo install --locked \
+    cargo-audit \
+    cargo-deny \
+    cargo-hack \
+    cargo-nextest \
+    cargo-tarpaulin \
+    cargo-watch \
+    cargo-expand \
+    cargo-tree \
+    cargo-outdated \
+    cargo-bloat \
+    flamegraph \
+    bpftrace \
+    cargo-insta \
+    cargo-hakari
+
+# Install Python tools
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir \
+    uv \
+    ruff \
+    mypy \
+    pytest \
+    pytest-asyncio \
+    pytest-cov \
+    black \
+    isort
+
+# Setup non-root user for development
+ARG USERNAME=developer
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+RUN groupadd --gid $USER_GID $USERNAME && \
+    useradd --uid $USER_UID --gid $USER_GID -m -s /bin/bash $USERNAME && \
+    echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
+    chmod 0440 /etc/sudoers.d/$USERNAME
+
+# Configure cargo for user
+USER $USERNAME
+WORKDIR /workspace
+RUN mkdir -p /home/$USERNAME/.cargo && \
+    echo '[net]\ngit-fetch-with-cli = true' > /home/$USERNAME/.cargo/config.toml
+
+# Default command
+CMD ["sleep", "infinity"]
