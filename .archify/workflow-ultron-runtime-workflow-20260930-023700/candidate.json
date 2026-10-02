@@ -1,0 +1,259 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ULTRON Runtime Execution Workflow",
+    "subtitle": "Sequential Signal Flow from Multimodal Intake to 3D Avatar Lip-Sync",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-ultron-runtime-workflow-20260930-023700/ultron-runtime-workflow.html",
+    "repository": {
+      "url": "https://github.com/Mahbub0001/ULTRON-Multi_Agent_Desktop_Assistant-",
+      "revision": "2841f769d3b3c7de3be90cc1ae8ed21965c0707e",
+      "provider": "github"
+    }
+  },
+  "lanes": [
+    { "id": "intake", "label": "Multimodal Ingestion Layer" },
+    { "id": "engine", "label": "Gemini Live Core Engine" },
+    { "id": "policy", "label": "Policy Gate & Action Routing", "variant": "exception" },
+    { "id": "agents", "label": "Living Office & AV Presentation" }
+  ],
+  "phases": [
+    { "id": "phase_intake", "label": "Sensory Intake & Guard", "fromCol": 0, "toCol": 1 },
+    { "id": "phase_reasoning", "label": "Live Stream & Policy Gate", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "phase_execution", "label": "ReAct Execution & Visemes", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "intake_group", "label": "Acoustic Intake", "lane": "intake", "fromCol": 0, "toCol": 1, "variant": "default" },
+    { "id": "policy_group", "label": "Safety Checkpoint", "lane": "policy", "fromCol": 2, "toCol": 3, "variant": "security" },
+    { "id": "town_group", "label": "Agent Department", "lane": "agents", "fromCol": 4, "toCol": 4, "variant": "emphasis" },
+    { "id": "av_group", "label": "Avatar & AV", "lane": "agents", "fromCol": 5, "toCol": 5, "variant": "default" }
+  ],
+  "mainPath": [
+    "user_input",
+    "echo_guard",
+    "gemini_live",
+    "safety_gate",
+    "action_router",
+    "agent_town",
+    "viseme_engine",
+    "avatar_hud"
+  ],
+  "nodes": [
+    {
+      "id": "user_input",
+      "lane": "intake",
+      "col": 0,
+      "type": "external",
+      "label": "User Interaction",
+      "sublabel": "16kHz audio / screen / text",
+      "tag": "multimodal intake",
+      "sources": [
+        { "path": "main.py", "line": 1395, "end_line": 1432, "label": "_open_mic audio intake" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "echo_guard",
+      "lane": "intake",
+      "col": 1,
+      "type": "frontend",
+      "label": "Echo Guard & Wake",
+      "sublabel": "acoustic subtraction",
+      "tag": "self-echo filter",
+      "sources": [
+        { "path": "core/echo.py", "line": 12, "end_line": 65, "label": "EchoGuard canceler" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "gemini_live",
+      "lane": "engine",
+      "col": 2,
+      "type": "cloud",
+      "label": "Gemini Live Stream",
+      "sublabel": "gemini-3.1-flash-live",
+      "tag": "bidirectional WS",
+      "sources": [
+        { "path": "main.py", "line": 99, "end_line": 104, "label": "Gemini Live session config" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "safety_gate",
+      "lane": "policy",
+      "col": 2,
+      "type": "security",
+      "label": "Confirm Gate",
+      "sublabel": "permission check",
+      "tag": "blocks unsafe ops",
+      "sources": [
+        { "path": "core/confirm.py", "line": 10, "end_line": 50, "label": "confirm_gate policy" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "action_router",
+      "lane": "policy",
+      "col": 3,
+      "type": "backend",
+      "label": "Action Dispatcher",
+      "sublabel": "tool & agent registry",
+      "tag": "_execute_tool",
+      "sources": [
+        { "path": "main.py", "line": 1106, "end_line": 1290, "label": "_execute_tool router" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "agent_town",
+      "lane": "agents",
+      "col": 4,
+      "type": "backend",
+      "label": "Agent Department",
+      "sublabel": "Alice, Bob, Carol, Dave",
+      "tag": "autonomous ReAct",
+      "sources": [
+        { "path": "core/agent_town.py", "line": 45, "end_line": 120, "label": "ResidentAgent department" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "system_tools",
+      "lane": "policy",
+      "col": 4,
+      "type": "messagebus",
+      "label": "System Actions",
+      "sublabel": "files, ADB phone, browser",
+      "tag": "Windows & Android",
+      "sources": [
+        { "path": "actions/file_controller.py", "line": 1, "end_line": 40, "label": "OS file operations" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "memory_undo",
+      "lane": "engine",
+      "col": 4,
+      "type": "database",
+      "label": "Memory & Undo",
+      "sublabel": "token store & rollback",
+      "tag": "persistence ledger",
+      "sources": [
+        { "path": "memory/memory_manager.py", "line": 20, "end_line": 70, "label": "long-term memory" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "viseme_engine",
+      "lane": "engine",
+      "col": 5,
+      "type": "frontend",
+      "label": "Viseme Synthesizer",
+      "sublabel": "acoustic formant stream",
+      "tag": "50 visemes/sec",
+      "sources": [
+        { "path": "core/viseme.py", "line": 15, "end_line": 80, "label": "VisemeStream extractor" }
+      ],
+      "width": 140
+    },
+    {
+      "id": "avatar_hud",
+      "lane": "agents",
+      "col": 5,
+      "type": "frontend",
+      "label": "3D Avatar & Audio",
+      "sublabel": "software 3D & 24kHz spk",
+      "tag": "holographic HUD",
+      "sources": [
+        { "path": "core/avatar.py", "line": 25, "end_line": 95, "label": "3D avatar renderer" }
+      ],
+      "width": 140
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_intake",
+      "from": "user_input",
+      "to": "echo_guard",
+      "variant": "default"
+    },
+    {
+      "id": "edge_stream",
+      "from": "echo_guard",
+      "to": "gemini_live",
+      "label": "filtered PCM",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_call",
+      "from": "gemini_live",
+      "to": "safety_gate",
+      "label": "tool call",
+      "variant": "security"
+    },
+    {
+      "id": "edge_approved",
+      "from": "safety_gate",
+      "to": "action_router",
+      "label": "approved",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_delegate",
+      "from": "action_router",
+      "to": "agent_town",
+      "label": "delegate task",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_tools",
+      "from": "action_router",
+      "to": "system_tools",
+      "label": "direct tool",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "edge_record",
+      "from": "system_tools",
+      "to": "memory_undo",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "edge_synth",
+      "from": "agent_town",
+      "to": "viseme_engine",
+      "label": "completed audio",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_render",
+      "from": "viseme_engine",
+      "to": "avatar_hud",
+      "label": "lip-sync frames",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Signal Flow Architecture",
+      "items": [
+        "Acoustic latency subtraction prevents feedback before WebSocket transmission",
+        "Bidirectional Gemini Live stream parses voice and screen multimodal frames"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Autonomous Department",
+      "items": [
+        "Resident agents (Alice, Bob, Carol, Dave) execute multi-step ReAct loops",
+        "Results synthesize directly into acoustic formants and 3D lip-sync visemes"
+      ]
+    }
+  ]
+}

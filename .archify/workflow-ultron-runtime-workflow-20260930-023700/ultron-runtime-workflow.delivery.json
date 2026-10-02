@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "50e176e3-0ea4-4820-98b2-5ddb1b22dba7",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "E:\\github-projects\\Mark-LIV\\.archify\\workflow-ultron-runtime-workflow-20260930-023700\\candidate.json",
+  "output": "E:\\github-projects\\Mark-LIV\\.archify\\workflow-ultron-runtime-workflow-20260930-023700\\ultron-runtime-workflow.html",
+  "specification": {
+    "sha256": "b17e2f24ed6fa21ee3eba100bb97690e6765ccb9350bfd2e3e5e950c6dba7c1c",
+    "bytes": 7556
+  },
+  "artifact": {
+    "sha256": "5799e0c7d3874065ebc85f4c94a590feadc9db84bc884b331883b62006d557f3",
+    "bytes": 788502
+  }
+}
