@@ -299,6 +299,3 @@ class YOLOv8Detector(BaseDetector):
 
 # Import cv2 at module level for preprocessing
 import cv2
-
-# Register with factory
-DetectorFactory.create("yolo", "dummy.onnx")  # Will be replaced with actual model path

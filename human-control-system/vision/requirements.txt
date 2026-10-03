@@ -1,8 +1,8 @@
 # Core dependencies
 numpy>=1.24.0
 opencv-python>=4.8.0
-onnxruntime-gpu>=1.18.0
-tensorrt>=10.1.0
+onnxruntime>=1.18.0
+# tensorrt>=10.1.0  # Optional, requires specific CUDA version
 
 # gRPC
 grpcio>=1.60.0
@@ -11,7 +11,8 @@ protobuf>=4.25.0
 
 # OCR
 paddleocr>=2.7.0
-paddlepaddle-gpu>=2.5.0
+# paddlepaddle-gpu>=2.5.0  # Not available for Python 3.14 yet
+# paddlepaddle>=2.5.0      # Not available for Python 3.14 yet
 tesseract>=0.1.3
 pytesseract>=0.3.10
 

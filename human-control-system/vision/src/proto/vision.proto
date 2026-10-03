@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package hcs.vision.v1;
 
-option python_package = "hcs.vision.proto";
+import "google/protobuf/empty.proto";
 
 // ============================================
 // Screen Capture

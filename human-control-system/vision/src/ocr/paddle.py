@@ -134,7 +134,3 @@ class PaddleOcrEngine(BaseOcrEngine):
     def close(self):
         """Clean up resources."""
         self._ocr = None
-
-
-# Register with factory
-OcrFactory.create("paddle")

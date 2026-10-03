@@ -199,8 +199,3 @@ class GDICapture(BaseCapture):
         if self._sct:
             self._sct.close()
             self._sct = None
-
-
-# Register with factory
-CaptureFactory.create("dxcam")  # Will use dxcam on Windows
-CaptureFactory.create("gdi")    # Fallback
