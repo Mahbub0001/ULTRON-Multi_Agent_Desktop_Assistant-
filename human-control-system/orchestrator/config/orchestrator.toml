@@ -1,0 +1,80 @@
+# Human Control System Orchestrator Configuration
+
+[grpc]
+# Agent daemon connection
+agent_endpoint = "http://127.0.0.1:50051"
+# Vision service connection
+vision_endpoint = "http://127.0.0.1:50052"
+# Brain service connection
+brain_endpoint = "http://127.0.0.1:50053"
+# Adapters service connection
+adapters_endpoint = "http://127.0.0.1:50054"
+
+# Connection settings
+connect_timeout_ms = 5000
+request_timeout_ms = 30000
+keepalive_interval_ms = 10000
+keepalive_timeout_ms = 5000
+
+# Authentication
+# Token can be set via HCS_AUTH_TOKEN env var or config
+# auth_token = ""
+
+[tui]
+# TUI settings
+refresh_rate_hz = 60
+theme = "dark"  # "dark", "light", "auto"
+mouse_enabled = true
+log_level = "info"  # "trace", "debug", "info", "warn", "error"
+
+# Panel layout (percentages)
+dashboard_width_pct = 30
+editor_width_pct = 70
+
+[dsl]
+# DSL interpreter settings
+max_execution_time_ms = 300000  # 5 minutes max per task
+max_loop_iterations = 10000
+max_recursion_depth = 100
+step_timeout_ms = 10000  # Default step timeout
+
+# Built-in variables
+[variables]
+# These are available in all tasks
+HCS_VERSION = "0.1.0"
+HCS_OS = "windows"  # auto-detected at runtime
+
+[recorder]
+# Recording settings
+default_capture_keyboard = true
+default_capture_mouse = true
+default_capture_delays = true
+max_recording_duration_seconds = 3600  # 1 hour
+output_directory = "recordings"
+# Recording format: "json", "protobuf"
+output_format = "json"
+
+[replay]
+# Replay settings
+default_speed = 1.0
+min_speed = 0.1
+max_speed = 10.0
+# Jitter settings for human-like replay
+enable_jitter = true
+jitter_factor = 0.1  # 10% random variation
+
+[logging]
+# Structured logging
+format = "json"  # "json", "pretty"
+level = "info"
+# Output: "stdout", "stderr", "file", "both"
+output = "stdout"
+file_path = "logs/orchestrator.log"
+max_file_size_mb = 100
+max_files = 10
+
+[metrics]
+# Prometheus metrics
+enabled = true
+port = 9090
+path = "/metrics"

@@ -1,0 +1,156 @@
+name: "Sample Automation Task"
+version: "1.0"
+description: "Demonstrates various DSL features"
+
+variables:
+  target_window:
+    type: "string"
+    default: "Notepad"
+    description: "Window title to target"
+  repeat_count:
+    type: "int"
+    default: 3
+    description: "Number of times to repeat"
+  message:
+    type: "string"
+    default: "Hello from HCS!"
+    description: "Message to type"
+
+macros:
+  open_notepad:
+    name: "Open Notepad"
+    description: "Opens Notepad application"
+    parameters: {}
+    steps:
+      - type: action
+        id: "press_win"
+        name: "Press Win key"
+        action:
+          kind: "key_down"
+          code: 91  # Left Win key
+      - type: action
+        id: "type_notepad"
+        name: "Type 'notepad'"
+        action:
+          kind: "type_text"
+          text: "notepad"
+          delay_ms: 50
+      - type: action
+        id: "press_enter"
+        name: "Press Enter"
+        action:
+          kind: "key_press"
+          code: 13
+      - type: action
+        id: "release_win"
+        name: "Release Win key"
+        action:
+          kind: "key_up"
+          code: 91
+      - type: action
+        id: "wait_open"
+        name: "Wait for Notepad to open"
+        action:
+          kind: "delay"
+          microseconds: 1000000
+
+  type_message:
+    name: "Type Message"
+    description: "Types the configured message"
+    parameters:
+      text:
+        type: "string"
+        required: true
+    steps:
+      - type: action
+        id: "type_text"
+        name: "Type message"
+        action:
+          kind: "type_text"
+          text: "${text}"
+          delay_ms: 30
+
+steps:
+  - type: macro
+    id: "open_notepad"
+    name: "Open Notepad"
+    macro_name: "open_notepad"
+
+  - type: wait
+    id: "wait_window"
+    name: "Wait for Notepad window"
+    condition: "window_exists('${target_window}')"
+    timeout_ms: 5000
+    poll_interval_ms: 500
+
+  - type: sequential
+    id: "main_sequence"
+    name: "Main automation sequence"
+    steps:
+      - type: macro
+        id: "type_hello"
+        name: "Type greeting"
+        macro_name: "type_message"
+        parameters:
+          text: "${message}"
+
+      - type: loop
+        id: "repeat_loop"
+        name: "Repeat typing"
+        loop_type: "count"
+        count: "${repeat_count}"
+        body:
+          type: sequential
+          id: "repeat_body"
+          name: "Repeat iteration"
+          steps:
+            - type: action
+              id: "type_iteration"
+              name: "Type iteration number"
+              action:
+                kind: "type_text"
+                text: " Iteration ${loop_counter}"
+                delay_ms: 50
+            - type: action
+              id: "press_enter"
+              name: "Press Enter"
+              action:
+                kind: "key_press"
+                code: 13
+            - type: action
+              id: "delay_between"
+              name: "Delay between iterations"
+              action:
+                kind: "delay"
+                microseconds: 500000
+
+      - type: conditional
+        id: "check_count"
+        name: "Check if we typed enough"
+        condition: "${repeat_count} > 5"
+        then_branch:
+          type: log
+          id: "log_many"
+          name: "Log many iterations"
+          level: "info"
+          message: "Typed more than 5 times!"
+        else_branch:
+          type: log
+          id: "log_few"
+          name: "Log few iterations"
+          level: "info"
+          message: "Typed 5 or fewer times"
+
+  - type: vision
+    id: "capture_result"
+    name: "Capture result"
+    operation:
+      type: "capture_screen"
+      monitor_index: 0
+      format: "png"
+
+  - type: log
+    id: "completion_log"
+    name: "Task completed"
+    level: "info"
+    message: "Task completed successfully! Captured screen to ${vision.capture.capture_result}"

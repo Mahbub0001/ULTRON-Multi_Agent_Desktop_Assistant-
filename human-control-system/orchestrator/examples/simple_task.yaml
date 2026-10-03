@@ -1,0 +1,26 @@
+name: "Simple Key Press"
+version: "1.0"
+description: "Presses a key combination"
+
+steps:
+  - type: action
+    id: "ctrl_down"
+    name: "Press Ctrl"
+    action:
+      kind: "key_down"
+      code: 17  # VK_CONTROL
+
+  - type: action
+    id: "press_c"
+    name: "Press C"
+    action:
+      kind: "key_press"
+      code: 67  # 'C' key
+      delay_ms: 50
+
+  - type: action
+    id: "ctrl_up"
+    name: "Release Ctrl"
+    action:
+      kind: "key_up"
+      code: 17

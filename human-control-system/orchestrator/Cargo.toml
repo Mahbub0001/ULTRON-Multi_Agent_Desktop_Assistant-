@@ -1,0 +1,74 @@
+[package]
+name = "hcs-orchestrator"
+version = "0.1.0"
+edition = "2021"
+description = "Human Control System Orchestrator - CLI/TUI and Task DSL"
+license = "MIT"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true, features = ["full", "tracing", "macros", "rt-multi-thread"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "json", "fmt"] }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde", "fast-rng"] }
+toml = { workspace = true }
+config = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+
+# gRPC/Networking
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tower = { workspace = true }
+
+# TUI
+ratatui = { version = "0.26", features = ["crossterm"], optional = true }
+crossterm = { version = "0.27", features = ["use-dev-tty"], optional = true }
+tui-textarea = { version = "0.4", features = ["crossterm", "search"], optional = true }
+tui-tree-widget = { version = "0.2", optional = true }
+
+# DSL
+starlark = { version = "0.14", optional = true }
+
+# Recorder
+rdev = { version = "0.5", optional = true }
+
+# Async/Utils
+async-trait = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+crossbeam = { workspace = true }
+tokio-util = { workspace = true }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Path
+dirs = "5.0"
+
+[build-dependencies]
+tonic-build = "0.10"
+prost-build = "0.12"
+
+[dev-dependencies]
+proptest = { workspace = true }
+mockall = { workspace = true }
+tempfile = "3.8"
+tokio-test = { version = "0.4" }
+
+[features]
+default = ["tui", "recorder", "dsl"]
+tui = ["ratatui", "crossterm", "tui-textarea", "tui-tree-widget"]
+recorder = ["rdev"]
+dsl = ["starlark"]
+
+[[bin]]
+name = "hcs"
+path = "src/main.rs"

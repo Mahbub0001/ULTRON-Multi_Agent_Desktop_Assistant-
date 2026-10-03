@@ -1,0 +1,321 @@
+syntax = "proto3";
+
+package hcs.orchestrator.v1;
+
+option rust_module = "orchestrator_proto";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================
+// Task Execution
+// ============================================
+
+message TaskDefinition {
+    string name = 1;
+    string version = 2;
+    string description = 3;
+    map<string, VariableDef> variables = 4;
+    repeated Step steps = 5;
+    map<string, MacroDef> macros = 6;
+}
+
+message VariableDef {
+    string type = 1; // "string", "int", "float", "bool", "list", "map"
+    string default = 2;
+    string description = 3;
+    bool required = 4;
+}
+
+message Step {
+    string id = 1;
+    string name = 2;
+    StepType type = 3;
+    map<string, google.protobuf.Value> parameters = 4;
+    Condition condition = 5;
+    Loop loop = 6;
+    repeated Step steps = 7; // for parallel/sequential blocks
+    uint32 timeout_ms = 8;
+    RetryPolicy retry = 9;
+}
+
+enum StepType {
+    STEP_TYPE_UNSPECIFIED = 0;
+    STEP_TYPE_ACTION = 1;        // Single action (key, mouse, delay)
+    STEP_TYPE_MACRO = 2;         // Execute macro
+    STEP_TYPE_SEQUENTIAL = 3;    // Sequential block
+    STEP_TYPE_PARALLEL = 4;      // Parallel block
+    STEP_TYPE_CONDITIONAL = 5;   // If/else
+    STEP_TYPE_LOOP = 6;          // For/while loop
+    STEP_TYPE_VISION = 7;        // Vision operation (detect, ocr)
+    STEP_TYPE_BRAIN = 8;         // Brain tree execution
+    STEP_TYPE_ADAPTER = 9;       // App adapter operation
+    STEP_TYPE_VARIABLE = 10;     // Set/get variable
+    STEP_TYPE_WAIT = 11;         // Wait for condition
+    STEP_TYPE_LOG = 12;          // Log message
+}
+
+message Condition {
+    string expression = 1; // Starlark expression
+}
+
+message Loop {
+    LoopType type = 1;
+    string iterator = 2;      // Variable name for iterator
+    string collection = 3;    // Expression for collection
+    string condition = 4;     // While condition
+    uint32 count = 5;         // For count
+}
+
+enum LoopType {
+    LOOP_TYPE_UNSPECIFIED = 0;
+    LOOP_TYPE_FOR_EACH = 1;
+    LOOP_TYPE_WHILE = 2;
+    LOOP_TYPE_COUNT = 3;
+}
+
+message RetryPolicy {
+    uint32 max_attempts = 1;
+    uint32 delay_ms = 2;
+    float backoff_multiplier = 3;
+    uint32 max_delay_ms = 4;
+    repeated string retry_on_errors = 5;
+}
+
+message MacroDef {
+    string name = 1;
+    string description = 2;
+    map<string, VariableDef> parameters = 3;
+    repeated Step steps = 4;
+}
+
+// ============================================
+// Recording
+// ============================================
+
+message Recording {
+    string id = 1;
+    string name = 2;
+    google.protobuf.Timestamp created_at = 3;
+    uint64 duration_us = 4;
+    repeated RecordedEvent events = 5;
+    map<string, string> metadata = 6;
+}
+
+message RecordedEvent {
+    oneof event {
+        KeyEvent key = 1;
+        MouseEvent mouse = 2;
+        DelayEvent delay = 3;
+    }
+    uint64 timestamp_us = 4;
+}
+
+// Reuse from agent.proto
+message KeyEvent {
+    uint32 code = 1;
+    KeyState state = 2;
+    uint32 scan_code = 3;
+    bool extended = 4;
+}
+
+enum KeyState {
+    KEY_STATE_UNSPECIFIED = 0;
+    KEY_STATE_DOWN = 1;
+    KEY_STATE_UP = 2;
+}
+
+message MouseEvent {
+    int32 x = 1;
+    int32 y = 2;
+    int32 dx = 3;
+    int32 dy = 4;
+    MouseButton button = 5;
+    KeyState button_state = 6;
+    bool absolute = 7;
+}
+
+enum MouseButton {
+    MOUSE_BUTTON_UNSPECIFIED = 0;
+    MOUSE_BUTTON_LEFT = 1;
+    MOUSE_BUTTON_RIGHT = 2;
+    MOUSE_BUTTON_MIDDLE = 3;
+    MOUSE_BUTTON_X1 = 4;
+    MOUSE_BUTTON_X2 = 5;
+    MOUSE_BUTTON_WHEEL_UP = 6;
+    MOUSE_BUTTON_WHEEL_DOWN = 7;
+    MOUSE_BUTTON_WHEEL_LEFT = 8;
+    MOUSE_BUTTON_WHEEL_RIGHT = 9;
+}
+
+message DelayEvent {
+    uint64 microseconds = 1;
+}
+
+// ============================================
+// Task Execution Requests/Responses
+// ============================================
+
+message ExecuteTaskRequest {
+    TaskDefinition task = 1;
+    map<string, string> variables = 2;
+    bool dry_run = 3;
+    string recording_output = 4;
+}
+
+message ExecuteTaskResponse {
+    bool success = 1;
+    string task_id = 2;
+    string error = 3;
+    google.protobuf.Struct result = 4;
+    uint64 execution_time_ms = 5;
+    repeated StepResult step_results = 6;
+}
+
+message StepResult {
+    string step_id = 1;
+    StepStatus status = 2;
+    google.protobuf.Struct output = 3;
+    string error = 4;
+    uint64 start_time_us = 5;
+    uint64 end_time_us = 6;
+    repeated StepResult sub_steps = 7;
+}
+
+enum StepStatus {
+    STEP_STATUS_UNSPECIFIED = 0;
+    STEP_STATUS_PENDING = 1;
+    STEP_STATUS_RUNNING = 2;
+    STEP_STATUS_COMPLETED = 3;
+    STEP_STATUS_FAILED = 4;
+    STEP_STATUS_SKIPPED = 5;
+}
+
+// ============================================
+// REPL
+// ============================================
+
+message ReplRequest {
+    string command = 1;
+    map<string, string> context = 2;
+}
+
+message ReplResponse {
+    bool success = 1;
+    string output = 2;
+    string error = 3;
+    map<string, string> updated_context = 4;
+    bool should_exit = 5;
+}
+
+// ============================================
+// Services
+// ============================================
+
+service OrchestratorService {
+    // Execute a task
+    rpc ExecuteTask(ExecuteTaskRequest) returns (ExecuteTaskResponse);
+    
+    // Execute task streaming (for long-running tasks)
+    rpc ExecuteTaskStream(ExecuteTaskRequest) returns (stream TaskProgress);
+    
+    // REPL evaluation
+    rpc ReplEval(ReplRequest) returns (ReplResponse);
+    
+    // Recording
+    rpc StartRecording(RecordingConfig) returns (google.protobuf.Empty);
+    rpc StopRecording(google.protobuf.Empty) returns (Recording);
+    rpc GetRecording(RecordingId) returns (Recording);
+    rpc ListRecordings(google.protobuf.Empty) returns (RecordingList);
+    rpc DeleteRecording(RecordingId) returns (google.protobuf.Empty);
+    
+    // Replay
+    rpc ReplayRecording(ReplayRequest) returns (ExecuteTaskResponse);
+    
+    // Macro management
+    rpc ListMacros(google.protobuf.Empty) returns (MacroList);
+    rpc GetMacro(MacroName) returns (MacroDef);
+    rpc SaveMacro(MacroDef) returns (google.protobuf.Empty);
+    rpc DeleteMacro(MacroName) returns (google.protobuf.Empty);
+    
+    // Health
+    rpc HealthCheck(google.protobuf.Empty) returns (HealthCheckResponse);
+}
+
+message RecordingConfig {
+    string name = 1;
+    bool capture_keyboard = 2;
+    bool capture_mouse = 3;
+    bool capture_delays = 4;
+    uint32 max_duration_seconds = 5;
+}
+
+message RecordingId {
+    string id = 1;
+}
+
+message RecordingList {
+    repeated RecordingMeta recordings = 1;
+}
+
+message RecordingMeta {
+    string id = 1;
+    string name = 2;
+    google.protobuf.Timestamp created_at = 3;
+    uint64 duration_us = 4;
+    uint32 event_count = 5;
+}
+
+message ReplayRequest {
+    string recording_id = 1;
+    float speed = 2; // 1.0 = normal, 2.0 = 2x, 0.5 = half
+    bool loop_playback = 3;
+    map<string, string> variable_overrides = 4;
+}
+
+message MacroList {
+    repeated MacroDef macros = 1;
+}
+
+message MacroName {
+    string name = 1;
+}
+
+message TaskProgress {
+    string task_id = 1;
+    string current_step = 2;
+    StepStatus step_status = 3;
+    float progress = 4; // 0.0 - 1.0
+    string log = 5;
+}
+
+// ============================================
+// Health Check Types
+// ============================================
+
+message HealthCheckResponse {
+    enum ServingStatus {
+        SERVING_STATUS_UNSPECIFIED = 0;
+        SERVING_STATUS_SERVING = 1;
+        SERVING_STATUS_NOT_SERVING = 2;
+        SERVING_STATUS_STARTING = 3;
+        SERVING_STATUS_STOPPING = 4;
+    }
+    ServingStatus status = 1;
+    string version = 2;
+    uint64 uptime_seconds = 3;
+    map<string, ComponentHealth> components = 4;
+}
+
+message ComponentHealth {
+    enum ComponentStatus {
+        COMPONENT_STATUS_UNSPECIFIED = 0;
+        COMPONENT_STATUS_HEALTHY = 1;
+        COMPONENT_STATUS_DEGRADED = 2;
+        COMPONENT_STATUS_UNHEALTHY = 3;
+    }
+    ComponentStatus status = 1;
+    string message = 2;
+    map<string, string> details = 3;
+}
