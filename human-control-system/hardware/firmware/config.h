@@ -1,0 +1,56 @@
+#pragma once
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#define FIRMWARE_VERSION_MAJOR 1
+#define FIRMWARE_VERSION_MINOR 0
+#define FIRMWARE_VERSION_PATCH 0
+
+#define TEENSY_MODEL_40 0
+#define TEENSY_MODEL_41 1
+
+#ifndef TEENSY_MODEL
+#define TEENSY_MODEL TEENSY_MODEL_40
+#endif
+
+#define USB_VID 0x16C0
+#define USB_PID 0x0486
+#define USB_MANUFACTURER "Mark-LIV"
+#define USB_PRODUCT "Human Control System"
+#define USB_SERIAL "HCS001"
+
+#define HID_KEYBOARD_REPORT_ID 1
+#define HID_MOUSE_REPORT_ID 2
+#define HID_CONSUMER_REPORT_ID 3
+#define HID_SYSTEM_REPORT_ID 4
+#define HID_RAW_REPORT_ID 5
+
+#define RAW_HID_EPSIZE 64
+#define RAW_HID_TX_INTERVAL 1
+#define RAW_HID_RX_INTERVAL 1
+
+#define PROTOCOL_VERSION 1
+#define PROTOCOL_MAGIC 0x48435300
+
+#define MAX_KEYS_PER_REPORT 6
+#define NKRO_ENABLED 1
+
+#define HEARTBEAT_INTERVAL_MS 1000
+#define ACK_TIMEOUT_MS 100
+#define MAX_PENDING_ACKS 32
+
+#define LED_PIN 13
+#define LED_ACTIVE_HIGH 1
+
+#define CPU_FREQUENCY_MHZ 600
+
+#if TEENSY_MODEL == TEENSY_MODEL_40
+#define FLASH_SIZE_KB 1984
+#define RAM_SIZE_KB 1024
+#elif TEENSY_MODEL == TEENSY_MODEL_41
+#define FLASH_SIZE_KB 7936
+#define RAM_SIZE_KB 1024
+#endif
+
+#endif

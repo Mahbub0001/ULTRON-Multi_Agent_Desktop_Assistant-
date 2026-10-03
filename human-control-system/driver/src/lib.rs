@@ -6,7 +6,9 @@
 pub mod error;
 pub mod types;
 pub mod platform;
+#[cfg(target_os = "windows")]
 pub mod interception;
+#[cfg(target_os = "linux")]
 pub mod uinput;
 pub mod hid;
 pub mod macros;
@@ -97,6 +99,16 @@ pub enum InputEvent {
     Keyboard(KeyboardEvent),
     Mouse(MouseEvent),
     Delay(u64), // microseconds
+}
+
+impl InputEvent {
+    pub fn key_down(code: u16, scan_code: u16) -> Self {
+        Self::Keyboard(KeyboardEvent { code, scan_code, state: KeyState::Down, extended: false, timestamp: 0 })
+    }
+
+    pub fn key_up(code: u16, scan_code: u16) -> Self {
+        Self::Keyboard(KeyboardEvent { code, scan_code, state: KeyState::Up, extended: false, timestamp: 0 })
+    }
 }
 
 /// Device information
@@ -271,9 +283,10 @@ struct ControllerStats {
 impl InputController {
     /// Create new input controller
     pub async fn new(config: DriverConfig) -> DriverResult<Self> {
-        let driver = DriverFactory::create_default(config.clone()).await?;
+        let mut driver = DriverFactory::create_default(config.clone()).await?;
+        driver.initialize().await?;
         Ok(Self {
-            driver: Arc::new(driver),
+            driver: Arc::from(driver),
             config,
             stats: Arc::new(parking_lot::RwLock::new(ControllerStats::default())),
         })
@@ -347,7 +360,7 @@ impl InputController {
     #[cfg(target_os = "windows")]
     fn virtual_key_to_scan_code(vk: u16) -> DriverResult<u16> {
         use windows::Win32::UI::Input::KeyboardAndMouse::MapVirtualKeyW;
-        use windows::Win32::UI::Input::KeyboardAndMouse::MAP_VIRTUAL_KEY_TYPE::MAPVK_VK_TO_VSC;
+        use windows::Win32::UI::Input::KeyboardAndMouse::MAPVK_VK_TO_VSC;
         let scan = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) };
         Ok(scan as u16)
     }
@@ -524,7 +537,8 @@ impl InputController {
     async fn get_mouse_position(&self) -> DriverResult<(i32, i32)> {
         #[cfg(target_os = "windows")]
         {
-            use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, POINT};
+            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        use windows::Win32::Foundation::POINT;
             let mut pt = POINT::default();
             unsafe { GetCursorPos(&mut pt) };
             Ok((pt.x, pt.y))
@@ -623,12 +637,3 @@ pub struct ControllerStatsSnapshot {
     pub last_error: Option<String>,
 }
 
-// Re-export platform modules
-#[cfg(target_os = "windows")]
-pub use platform::windows::*;
-
-#[cfg(target_os = "linux")]
-pub use platform::linux::*;
-
-#[cfg(target_os = "macos")]
-pub use platform::macos::*;

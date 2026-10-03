@@ -83,7 +83,7 @@ def _run_setuptools() -> None:
         name="ultron-desktop-assistant",
         version="1.54.0",
         description="ULTRON — Advanced Multi-Agent Desktop AI Assistant with Living Office & Autonomous Capabilities",
-        long_description=(HERE / "README.md").read_text(encoding="utf-8") if (HERE / "README.md").exists() else "",
+        long_description=(HERE / "readme.md").read_text(encoding="utf-8") if (HERE / "readme.md").exists() else "",
         long_description_content_type="text/markdown",
         author="Nibir",
         python_requires=">=3.11",
@@ -105,7 +105,7 @@ def main() -> None:
 
     # requirements.txt filters OS-specific extras by itself via pip markers.
     _run("Installing Python dependencies (OS-specific extras auto-filtered)…",
-         [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+         [sys.executable, "-m", "pip", "install", "-r", str(HERE / "requirements.txt")])
 
     # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.
     # (Safari automation additionally needs: python -m playwright install webkit)

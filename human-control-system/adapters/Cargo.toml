@@ -1,0 +1,92 @@
+# App Adapters
+# High-level interfaces to control specific applications
+
+[package]
+name = "hcs-adapters"
+version = "0.1.0"
+edition = "2021"
+description = "Human Control System - App Adapters (Photoshop, Chrome, Games, Windows)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourorg/human-control-system"
+categories = ["os", "hardware-support", "automation"]
+keywords = ["photoshop", "chrome", "cdp", "memory", "window", "automation", "grpc"]
+
+[dependencies]
+# Core workspace dependencies
+tokio = { workspace = true, features = ["full", "tracing"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+
+# gRPC/Networking
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tower = { workspace = true }
+
+# Async/Utils
+async-trait = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+crossbeam = { workspace = true }
+tokio-util = { workspace = true }
+
+# Serialization/Config
+toml = { workspace = true }
+config = { workspace = true }
+clap = { workspace = true }
+
+# Windows/Linux specific
+windows = { workspace = true, optional = true }
+nix = { workspace = true, optional = true }
+
+# Memory/Process
+goblin = "0.6"
+memmap2 = "0.9"
+pelite = "0.10"
+
+# CDP (Chrome DevTools Protocol) - using raw WebSocket/HTTP
+# cdp = { git = "https://github.com/fantasywiht/cdp.rs", rev = "main" }
+tungstenite = "0.22"
+tokio-tungstenite = { version = "0.22", features = ["native-tls"] }
+
+# Image processing
+image = "0.24"
+
+# Metrics
+prometheus = "0.13"
+prometheus-client = "0.25"
+
+# HTTP for metrics
+warp = "0.3"
+
+# Random
+rand = "0.8"
+
+[dev-dependencies]
+proptest = { workspace = true }
+mockall = { workspace = true }
+tokio-test = "0.4"
+
+[build-dependencies]
+tonic-build = "0.10"
+prost-build = "0.12"
+
+[features]
+default = []
+windows_apis = ["windows"]
+linux_apis = ["nix"]
+test_utils = []
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true }

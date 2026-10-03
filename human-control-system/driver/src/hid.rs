@@ -66,7 +66,7 @@ struct NKROReport {
 /// HID Driver for hardware injection
 pub struct HIDDriver {
     config: DriverConfig,
-    port: Option<Box<dyn SerialPort>>,
+    port: Mutex<Option<Box<dyn SerialPort>>>,
     port_path: Option<String>,
     initialized: bool,
     keyboard_state: Arc<Mutex<KeyboardReport>>,
@@ -82,7 +82,7 @@ impl HIDDriver {
         
         Ok(Self {
             config,
-            port: None,
+            port: Mutex::new(None),
             port_path: None,
             initialized: false,
             keyboard_state: Arc::new(Mutex::new(KeyboardReport::default())),
@@ -149,7 +149,7 @@ impl HIDDriver {
         // Send handshake
         self.handshake(&mut port).await?;
         
-        self.port = Some(port);
+        *self.port.lock() = Some(port);
         self.port_path = Some(port_path.to_string());
         self.initialized = true;
         
@@ -179,8 +179,9 @@ impl HIDDriver {
         Ok(())
     }
     
-    fn send_report(&mut self, report_id: u8, data: &[u8]) -> DriverResult<()> {
-        let port = self.port.as_mut().ok_or(DriverError::NotInitialized)?;
+    fn send_report(&self, report_id: u8, data: &[u8]) -> DriverResult<()> {
+        let mut port_guard = self.port.lock();
+        let port = port_guard.as_mut().ok_or(DriverError::NotInitialized)?;
         
         // Build packet: [report_id][data...]
         let mut packet = BytesMut::with_capacity(1 + data.len());
@@ -205,8 +206,8 @@ impl InputDriver for HIDDriver {
         if self.port_path.is_none() {
             let port_path = self.auto_detect().await?;
             self.connect(&port_path).await?;
-        } else if let Some(path) = &self.port_path {
-            self.connect(path).await?;
+        } else if let Some(path) = self.port_path.clone() {
+            self.connect(&path).await?;
         } else {
             return Err(DriverError::ConfigError("No HID device specified".into()));
         }
@@ -215,7 +216,7 @@ impl InputDriver for HIDDriver {
     }
     
     fn is_ready(&self) -> bool {
-        self.initialized && self.port.is_some()
+        self.initialized && self.port.lock().is_some()
     }
     
     #[instrument(skip(self))]
@@ -264,20 +265,11 @@ impl InputDriver for HIDDriver {
             }
         }
         
-        // Send report
-        let data = unsafe {
-            std::slice::from_raw_parts(
-                state as *const _ as *const u8,
-                std::mem::size_of::<KeyboardReport>()
-            )
-        };
-        
-        // Need mutable self for send_report - use interior mutability pattern
-        drop(state); // Release lock before sending
-        
-        // This is a workaround - in real impl use Arc<Mutex<SerialPort>>
-        // For now, return Ok and note limitation
-        Ok(())
+        let mut data = [0u8; 8];
+        data[0] = state.modifier;
+        data[2..].copy_from_slice(&state.keys);
+        self.send_report(REPORT_ID_KEYBOARD, &data)
+
     }
     
     #[instrument(skip(self))]
@@ -310,16 +302,14 @@ impl InputDriver for HIDDriver {
             }
         }
         
-        // Send report
-        let data = unsafe {
-            std::slice::from_raw_parts(
-                state as *const _ as *const u8,
-                std::mem::size_of::<MouseReport>()
-            )
-        };
-        
-        drop(state);
-        Ok(())
+        let mut data = Vec::with_capacity(7);
+        data.push(state.buttons);
+        data.extend_from_slice(&state.x.to_le_bytes());
+        data.extend_from_slice(&state.y.to_le_bytes());
+        data.push(state.wheel as u8);
+        data.push(state.hwheel as u8);
+        self.send_report(REPORT_ID_MOUSE, &data)
+
     }
     
     #[instrument(skip(self))]
@@ -383,10 +373,12 @@ impl InputDriver for HIDDriver {
             state.hwheel = 0;
         }
         
-        // Send final reports
-        // (would need mutable access to port)
+        if self.port.lock().is_some() {
+            self.send_report(REPORT_ID_KEYBOARD, &[0; 8])?;
+            self.send_report(REPORT_ID_MOUSE, &[0; 7])?;
+        }
         
-        if let Some(mut port) = self.port.take() {
+        if let Some(mut port) = self.port.lock().take() {
             let _ = port.flush();
         }
         
@@ -421,18 +413,18 @@ impl HIDDriver {
             0x2C => 0x46, // Print Screen
             0x2D => 0x49, // Insert
             0x2E => 0x4C, // Delete
-            0x30..=0x39 => 0x27 + (vk - 0x30), // 0-9
-            0x41..=0x5A => 0x04 + (vk - 0x41), // A-Z
+            0x30..=0x39 => (0x27 + (vk - 0x30)) as u8, // 0-9
+            0x41..=0x5A => (0x04 + (vk - 0x41)) as u8, // A-Z
             0x5B => 0xE3, // Left GUI
             0x5C => 0xE7, // Right GUI
             0x5D => 0x65, // Application
-            0x60..=0x69 => 0x59 + (vk - 0x60), // Numpad 0-9
+            0x60..=0x69 => (0x59 + (vk - 0x60)) as u8, // Numpad 0-9
             0x6A => 0x55, // Numpad *
             0x6B => 0x57, // Numpad +
             0x6D => 0x56, // Numpad -
             0x6E => 0x63, // Numpad .
             0x6F => 0x54, // Numpad /
-            0x70..=0x87 => 0x3A + (vk - 0x70), // F1-F24
+            0x70..=0x87 => (0x3A + (vk - 0x70)) as u8, // F1-F24
             0x90 => 0x53, // Num Lock
             0x91 => 0x47, // Scroll Lock
             0xA0 => 0xE1, // Left Shift

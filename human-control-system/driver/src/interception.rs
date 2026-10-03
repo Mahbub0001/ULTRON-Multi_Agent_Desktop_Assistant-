@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{info, warn, error, debug, instrument};
 use windows::Win32::Foundation::*;
-use windows::Win32::System::IO::*;
+use std::ffi::c_void;
 use windows::Win32::System::LibraryLoader::*;
 use windows::core::*;
 
@@ -40,12 +40,6 @@ pub enum IsPredicate {
     MouseRightButtonUp = 0x0020,
     MouseMiddleButtonDown = 0x0040,
     MouseMiddleButtonUp = 0x0080,
-    MouseButton1Down = 0x0004,
-    MouseButton1Up = 0x0008,
-    MouseButton2Down = 0x0010,
-    MouseButton2Up = 0x0020,
-    MouseButton3Down = 0x0040,
-    MouseButton3Up = 0x0080,
     MouseButton4Down = 0x0100,
     MouseButton4Up = 0x0200,
     MouseButton5Down = 0x0400,
@@ -81,7 +75,7 @@ pub struct InterceptionMouseStroke {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub union InterceptionStroke {
     pub key: InterceptionKeyStroke,
     pub mouse: InterceptionMouseStroke,
@@ -164,32 +158,32 @@ impl InterceptionDriver {
         info!("Loading Interception from: {:?}", dll_path);
         
         unsafe {
-            self.dll_handle = Some(LoadLibraryW(&dll_path)?);
+            self.dll_handle = Some(LoadLibraryW(&HSTRING::from(dll_path))?);
         }
         
         let dll = self.dll_handle.unwrap();
         
         // Get function pointers
         let create_context: InterceptionCreateContext = unsafe {
-            std::mem::transmute(GetProcAddress(dll, s!("interception_create_context"))?)
+            std::mem::transmute(GetProcAddress(dll, s!("interception_create_context")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         let destroy_context: InterceptionDestroyContext = unsafe {
-            std::mem::transmute(GetProcAddress(dll, s!("interception_destroy_context"))?)
+            std::mem::transmute(GetProcAddress(dll, s!("interception_destroy_context")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         let set_filter: InterceptionSetFilter = unsafe {
-            std::mem::transmute(GetProcAddress(dll, s!("interception_set_filter"))?)
+            std::mem::transmute(GetProcAddress(dll, s!("interception_set_filter")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         let send: InterceptionSend = unsafe {
-            std::mem::transmute(GetProcAddress(dll, s!("interception_send"))?)
+            std::mem::transmute(GetProcAddress(dll, s!("interception_send")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         let is_keyboard: InterceptionIsKeyboard = unsafe {
-            std::mem::transmute(GetProcAddress(dll, s!("interception_is_keyboard"))?)
+            std::mem::transmute(GetProcAddress(dll, s!("interception_is_keyboard")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         let is_mouse: InterceptionIsMouse = unsafe {
-            std::mem::transmute(GetProcAddress(dll, s!("interception_is_mouse"))?)
+            std::mem::transmute(GetProcAddress(dll, s!("interception_is_mouse")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         let get_hardware_id: InterceptionGetHardwareID = unsafe {
-            std::mem::transmute(GetProcAddress(dll, s!("interception_get_hardware_id"))?)
+            std::mem::transmute(GetProcAddress(dll, s!("interception_get_hardware_id")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         
         // Create context
@@ -363,7 +357,7 @@ impl InputDriver for InterceptionDriver {
         }
         
         let send_fn: InterceptionSend = unsafe {
-            std::mem::transmute(GetProcAddress(self.dll_handle.unwrap(), s!("interception_send"))?)
+            std::mem::transmute(GetProcAddress(self.dll_handle.unwrap(), s!("interception_send")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         
         let sent = unsafe {
@@ -444,7 +438,7 @@ impl InputDriver for InterceptionDriver {
         }
         
         let send_fn: InterceptionSend = unsafe {
-            std::mem::transmute(GetProcAddress(self.dll_handle.unwrap(), s!("interception_send"))?)
+            std::mem::transmute(GetProcAddress(self.dll_handle.unwrap(), s!("interception_send")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         
         let sent = unsafe {
@@ -529,7 +523,7 @@ impl InputDriver for InterceptionDriver {
         
         // Send all strokes
         let send_fn: InterceptionSend = unsafe {
-            std::mem::transmute(GetProcAddress(self.dll_handle.unwrap(), s!("interception_send"))?)
+            std::mem::transmute(GetProcAddress(self.dll_handle.unwrap(), s!("interception_send")).ok_or_else(|| DriverError::PlatformError("Missing Interception DLL export".into()))?)
         };
         
         for (device, stroke) in strokes {
@@ -567,13 +561,15 @@ impl InputDriver for InterceptionDriver {
     
     async fn shutdown(&mut self) -> DriverResult<()> {
         if let Some(dll) = self.dll_handle {
-            if let Ok(destroy_context) = unsafe {
+            if let Some(destroy_context) = unsafe {
                 GetProcAddress(dll, s!("interception_destroy_context"))
             } {
                 let fn_ptr: InterceptionDestroyContext = unsafe { std::mem::transmute(destroy_context) };
                 unsafe { fn_ptr(self.context) };
             }
-            let _ = FreeLibrary(dll);
+            let _ = unsafe { FreeLibrary(dll) };
+            self.dll_handle = None;
+            self.context = std::ptr::null_mut();
         }
         self.initialized = false;
         info!("Interception driver shutdown");

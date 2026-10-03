@@ -140,8 +140,11 @@ ULTRON features a built-in document processor powered by `python-docx` and Windo
 git clone https://github.com/Mahbub0001/ULTRON-Multi_Agent_Desktop_Assistant-.git
 cd ULTRON-Multi_Agent_Desktop_Assistant-
 
+# Create an isolated Python environment (Windows)
+python -m venv .venv
+
 # Run the OS-aware environment installer (auto-installs all dependencies)
-python setup.py
+.venv\Scripts\python.exe setup.py
 ```
 
 ### 3. Configure API Key
@@ -161,8 +164,26 @@ Edit `config/api_keys.json` with your key:
 
 ### 4. Launch ULTRON
 ```bash
-python main.py
+.venv\Scripts\python.exe main.py
 ```
+
+On Windows, `run_jarvis.bat` also uses the project's `.venv` when present.
+On macOS/Linux, use `.venv/bin/python` for the commands above.
+
+### Optional Rust subsystem
+
+`human-control-system` is a separate subsystem and is not needed to launch the
+Python assistant. Its Windows build needs Rust's MSVC toolchain, Visual Studio
+Build Tools with **Desktop development with C++**, a Windows SDK, and `protoc`.
+Use its helper to select the Visual Studio linker even when Git's `link.exe`
+appears first on PATH:
+
+```powershell
+.\human-control-system\cargo-windows.ps1 check --workspace
+```
+
+The helper reports missing build prerequisites before invoking Cargo. A complete
+workspace build also requires the subsystem's source modules to be present.
 
 ---
 

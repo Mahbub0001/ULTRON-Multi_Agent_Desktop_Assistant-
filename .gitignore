@@ -13,8 +13,10 @@ config/email_config.json
 config/certs/
 # Linked WhatsApp session
 config/whatsapp_web/
-**/token*.json                # Google OAuth tokens (Gmail / Calendar plugins)
-**/client_secret*.json        # Google OAuth client secrets
+# Google OAuth tokens (Gmail / Calendar plugins)
+**/token*.json
+# Google OAuth client secrets
+**/client_secret*.json
 *credentials*.json
 .env
 .env.*
@@ -36,6 +38,11 @@ build/
 dist/
 *.egg-info/
 .eggs/
+.pytest_cache/
+
+# Rust build output and downloaded toolchain installer
+human-control-system/target/
+/rustup-init.exe
 
 # ── Virtual environments ──────────────────────────────────────────────────────
 .venv/

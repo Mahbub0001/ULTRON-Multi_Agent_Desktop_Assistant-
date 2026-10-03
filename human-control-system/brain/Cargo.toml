@@ -1,0 +1,62 @@
+[package]
+name = "brain"
+version = "0.1.0"
+edition = "2021"
+description = "Decision Engine with Behavior Tree and WASM Plugin System"
+
+[dependencies]
+# Core workspace dependencies
+tokio = { workspace = true, features = ["full", "tracing"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+
+# gRPC/Networking
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tower = { workspace = true }
+
+# Async/Utils
+async-trait = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+crossbeam = { workspace = true }
+tokio-util = { workspace = true }
+
+# Serialization/Config
+toml = { workspace = true }
+config = { workspace = true }
+clap = { workspace = true }
+
+# WASM
+wasmtime = { workspace = true }
+wit-component = "0.261"
+
+# Metrics
+prometheus = "0.13"
+prometheus-client = "0.25"
+
+# Visualization
+# graphviz = "0.11"  # Not available on crates.io
+
+# HTTP for metrics
+warp = "0.3"
+
+# Random
+rand = "0.8"
+
+[dev-dependencies]
+proptest = { workspace = true }
+mockall = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.10"
+prost-build = "0.12"

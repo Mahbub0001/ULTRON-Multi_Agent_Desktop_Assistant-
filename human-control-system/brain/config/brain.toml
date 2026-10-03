@@ -1,0 +1,39 @@
+[server]
+host = "0.0.0.0"
+port = 50053
+max_concurrent_trees = 100
+tick_timeout_ms = 1000
+
+[behavior_tree]
+max_depth = 100
+max_nodes = 10000
+default_tick_rate_hz = 60
+enable_visualization = true
+
+[wasm]
+plugin_dir = "plugins"
+max_memory_mb = 64
+max_fuel_per_tick = 1000000
+fuel_per_instruction = 1
+enable_hot_reload = true
+hot_reload_interval_ms = 5000
+allowed_host_functions = [
+    "blackboard_get",
+    "blackboard_set",
+    "blackboard_has",
+    "log_info",
+    "log_warn",
+    "log_error",
+    "get_time_ms",
+    "random_float",
+    "random_int",
+]
+
+[metrics]
+enabled = true
+port = 9091
+path = "/metrics"
+
+[logging]
+level = "info"
+format = "json"

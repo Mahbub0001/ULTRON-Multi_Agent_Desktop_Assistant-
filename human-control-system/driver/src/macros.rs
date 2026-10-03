@@ -361,43 +361,43 @@ pub mod mouse {
     /// Click at current position
     pub fn click(button: MouseButton) -> Vec<InputEvent> {
         vec![
-            InputEvent::MouseButtonDown { button },
+            button_event(button, KeyState::Down),
             InputEvent::Delay(50_000),
-            InputEvent::MouseButtonUp { button },
+            button_event(button, KeyState::Up),
         ]
     }
     
     /// Double click
     pub fn double_click(button: MouseButton) -> Vec<InputEvent> {
         vec![
-            InputEvent::MouseButtonDown { button },
+            button_event(button, KeyState::Down),
             InputEvent::Delay(50_000),
-            InputEvent::MouseButtonUp { button },
+            button_event(button, KeyState::Up),
             InputEvent::Delay(100_000),
-            InputEvent::MouseButtonDown { button },
+            button_event(button, KeyState::Down),
             InputEvent::Delay(50_000),
-            InputEvent::MouseButtonUp { button },
+            button_event(button, KeyState::Up),
         ]
     }
     
     /// Drag from current position
     pub fn drag_start(button: MouseButton) -> Vec<InputEvent> {
-        vec![InputEvent::MouseButtonDown { button }]
+        vec![button_event(button, KeyState::Down)]
     }
     
     pub fn drag_end(button: MouseButton) -> Vec<InputEvent> {
-        vec![InputEvent::MouseButtonUp { button }]
+        vec![button_event(button, KeyState::Up)]
     }
     
     /// Scroll
     pub fn scroll(delta: i32) -> Vec<InputEvent> {
-        vec![InputEvent::MouseWheel { delta_x: 0, delta_y: delta }]
+        (0..delta.unsigned_abs()).map(|_| button_event(if delta > 0 { MouseButton::WheelUp } else { MouseButton::WheelDown }, KeyState::Down)).collect()
     }
     
     /// Smooth move to position
     pub fn smooth_move(x: i32, y: i32, steps: u32) -> Vec<InputEvent> {
         // This would need current position - simplified
-        vec![InputEvent::MouseMove { x, y, absolute: true }]
+        vec![InputEvent::Mouse(MouseEvent { x, y, dx: 0, dy: 0, absolute: true, button: None, button_state: None, timestamp: 0 })]
     }
 }
 
@@ -415,55 +415,11 @@ impl MacroExecutor {
     pub async fn execute(&self, events: Vec<InputEvent>, variance_ms: u64) -> DriverResult<()> {
         for event in events {
             match event {
-                InputEvent::KeyDown { code, scan, .. } => {
-                    self.controller.inject_keyboard(KeyboardEvent {
-                        code,
-                        state: KeyState::Down,
-                        scan_code: scan,
-                        extended: false,
-                        timestamp: 0,
-                    }).await?;
-                }
-                InputEvent::KeyUp { code, scan, .. } => {
-                    self.controller.inject_keyboard(KeyboardEvent {
-                        code,
-                        state: KeyState::Up,
-                        scan_code: scan,
-                        extended: false,
-                        timestamp: 0,
-                    }).await?;
-                }
-                InputEvent::MouseMove { x, y, absolute } => {
-                    self.controller.inject_mouse(MouseEvent {
-                        x, y, dx: 0, dy: 0,
-                        button: None, button_state: None,
-                        absolute, timestamp: 0,
-                    }).await?;
-                }
-                InputEvent::MouseButtonDown { button } => {
-                    self.controller.inject_mouse(MouseEvent {
-                        x: 0, y: 0, dx: 0, dy: 0,
-                        button: Some(button), button_state: Some(KeyState::Down),
-                        absolute: false, timestamp: 0,
-                    }).await?;
-                }
-                InputEvent::MouseButtonUp { button } => {
-                    self.controller.inject_mouse(MouseEvent {
-                        x: 0, y: 0, dx: 0, dy: 0,
-                        button: Some(button), button_state: Some(KeyState::Up),
-                        absolute: false, timestamp: 0,
-                    }).await?;
-                }
-                InputEvent::MouseWheel { delta_x, delta_y } => {
-                    if delta_y > 0 {
-                        self.controller.scroll(delta_y, delta_x).await?;
-                    } else if delta_y < 0 {
-                        self.controller.scroll(delta_y, delta_x).await?;
-                    }
-                }
-                InputEvent::Delay { microseconds } => {
-                    let variance = (rand::random::<u64>() % variance_ms) * 1000;
-                    tokio::time::sleep(Duration::from_micros(microseconds + variance)).await;
+                InputEvent::Keyboard(event) => self.controller.inject_keyboard(event).await?,
+                InputEvent::Mouse(event) => self.controller.inject_mouse(event).await?,
+                InputEvent::Delay(microseconds) => {
+                    let variance = if variance_ms == 0 { 0 } else { (rand::random::<u64>() % variance_ms).saturating_mul(1000) };
+                    tokio::time::sleep(Duration::from_micros(microseconds.saturating_add(variance))).await;
                 }
             }
         }
@@ -522,4 +478,7 @@ mod tests {
         let reload = gaming::reload();
         assert!(reload.len() >= 3);
     }
+}
+fn button_event(button: MouseButton, state: KeyState) -> InputEvent {
+    InputEvent::Mouse(MouseEvent { x: 0, y: 0, dx: 0, dy: 0, button: Some(button), button_state: Some(state), absolute: false, timestamp: 0 })
 }

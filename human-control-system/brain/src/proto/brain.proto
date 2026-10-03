@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package brain;
+
+
+service BrainService {
+  // Execute a behavior tree
+  rpc ExecuteTree(ExecuteTreeRequest) returns (ExecuteTreeResponse);
+  // Execute a single tick of a behavior tree
+  rpc TickTree(TickTreeRequest) returns (TickTreeResponse);
+  // Get tree status
+  rpc GetTreeStatus(GetTreeStatusRequest) returns (GetTreeStatusResponse);
+  // Stop a running tree
+  rpc StopTree(StopTreeRequest) returns (StopTreeResponse);
+  // Load a tree from definition
+  rpc LoadTree(LoadTreeRequest) returns (LoadTreeResponse);
+  // Unload a tree
+  rpc UnloadTree(UnloadTreeRequest) returns (UnloadTreeResponse);
+  // List loaded trees
+  rpc ListTrees(ListTreesRequest) returns (ListTreesResponse);
+  // Get tree visualization (DOT/JSON)
+  rpc GetTreeVisualization(GetTreeVisualizationRequest) returns (GetTreeVisualizationResponse);
+  // Hot reload WASM plugins
+  rpc ReloadPlugins(ReloadPluginsRequest) returns (ReloadPluginsResponse);
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  // Metrics
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+// Tree execution
+message ExecuteTreeRequest {
+  string tree_id = 1;
+  string tree_definition = 2; // JSON/YAML tree definition
+  map<string, string> initial_blackboard = 3;
+  bool persist_state = 4;
+}
+
+message ExecuteTreeResponse {
+  bool success = 1;
+  string tree_id = 2;
+  string error = 3;
+  TreeStatus final_status = 4;
+  map<string, string> final_blackboard = 5;
+  uint64 ticks_executed = 6;
+  double execution_time_ms = 7;
+}
+
+// Single tick
+message TickTreeRequest {
+  string tree_id = 1;
+  map<string, string> blackboard_updates = 2;
+}
+
+message TickTreeResponse {
+  bool success = 1;
+  TreeStatus status = 2;
+  map<string, string> blackboard = 3;
+  string error = 4;
+  double tick_time_ms = 5;
+}
+
+// Tree status
+message GetTreeStatusRequest {
+  string tree_id = 1;
+}
+
+message GetTreeStatusResponse {
+  bool success = 1;
+  TreeStatus status = 2;
+  map<string, string> blackboard = 3;
+  uint64 ticks_executed = 4;
+  string error = 5;
+}
+
+message StopTreeRequest {
+  string tree_id = 1;
+  bool force = 2;
+}
+
+message StopTreeResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// Tree loading
+message LoadTreeRequest {
+  string tree_id = 1;
+  string tree_definition = 2; // JSON/YAML
+  map<string, string> initial_blackboard = 3;
+}
+
+message LoadTreeResponse {
+  bool success = 1;
+  string tree_id = 2;
+  string error = 3;
+}
+
+message UnloadTreeRequest {
+  string tree_id = 1;
+}
+
+message UnloadTreeResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message ListTreesRequest {}
+
+message ListTreesResponse {
+  repeated TreeInfo trees = 1;
+}
+
+message TreeInfo {
+  string tree_id = 1;
+  TreeStatus status = 2;
+  uint64 ticks_executed = 3;
+  string root_node_type = 4;
+  uint32 node_count = 5;
+}
+
+// Visualization
+message GetTreeVisualizationRequest {
+  string tree_id = 1;
+  VisualizationFormat format = 2;
+}
+
+enum VisualizationFormat {
+  VISUALIZATION_FORMAT_UNSPECIFIED = 0;
+  VISUALIZATION_FORMAT_DOT = 1;
+  VISUALIZATION_FORMAT_JSON = 2;
+  VISUALIZATION_FORMAT_MERMAID = 3;
+}
+
+message GetTreeVisualizationResponse {
+  bool success = 1;
+  string visualization = 2;
+  string error = 3;
+}
+
+// Plugin management
+message ReloadPluginsRequest {
+  repeated string plugin_paths = 1;
+}
+
+message ReloadPluginsResponse {
+  bool success = 1;
+  repeated PluginLoadResult results = 2;
+  string error = 3;
+}
+
+message PluginLoadResult {
+  string plugin_path = 1;
+  bool success = 2;
+  string plugin_name = 3;
+  string error = 4;
+}
+
+// Health and metrics
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string version = 2;
+  uint64 uptime_seconds = 3;
+  map<string, string> components = 4;
+}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+  bool success = 1;
+  string metrics = 2; // Prometheus format
+  string error = 3;
+}
+
+// Tree status enum
+enum TreeStatus {
+  TREE_STATUS_UNSPECIFIED = 0;
+  TREE_STATUS_RUNNING = 1;
+  TREE_STATUS_SUCCESS = 2;
+  TREE_STATUS_FAILURE = 3;
+  TREE_STATUS_STOPPED = 4;
+  TREE_STATUS_ERROR = 5;
+  TREE_STATUS_NOT_LOADED = 6;
+}
+
+// Node status for visualization
+message NodeStatus {
+  string node_id = 1;
+  string node_name = 2;
+  string node_type = 3;
+  NodeExecutionStatus status = 4;
+  repeated NodeStatus children = 5;
+  map<string, string> blackboard_keys = 6;
+}
+
+enum NodeExecutionStatus {
+  NODE_EXECUTION_STATUS_UNSPECIFIED = 0;
+  NODE_EXECUTION_STATUS_PENDING = 1;
+  NODE_EXECUTION_STATUS_RUNNING = 2;
+  NODE_EXECUTION_STATUS_SUCCESS = 3;
+  NODE_EXECUTION_STATUS_FAILURE = 4;
+  NODE_EXECUTION_STATUS_SKIPPED = 5;
+}

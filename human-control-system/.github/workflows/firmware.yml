@@ -1,0 +1,123 @@
+name: Firmware Build
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'hardware/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'hardware/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        board: [TEENSY40, TEENSY41]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        uses: fiam/arm-none-eabi-gcc@v1
+        with:
+          version: '13.2.rel1'
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          version: '3.28'
+
+      - name: Configure CMake (${{ matrix.board }})
+        run: |
+          cmake -B build_${{ matrix.board }} -S hardware \
+            -DBOARD=${{ matrix.board }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=hardware/cmake/arm-none-eabi.cmake
+
+      - name: Build firmware (${{ matrix.board }})
+        run: |
+          cmake --build build_${{ matrix.board }} --config Release -j$(nproc)
+
+      - name: Size report (${{ matrix.board }})
+        run: |
+          arm-none-eabi-size -A build_${{ matrix.board }}/firmware.elf
+          arm-none-eabi-size -B build_${{ matrix.board }}/firmware.elf
+
+      - name: Upload firmware artifacts (${{ matrix.board }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}
+          path: |
+            build_${{ matrix.board }}/firmware.hex
+            build_${{ matrix.board }}/firmware.bin
+            build_${{ matrix.board }}/firmware.elf
+            build_${{ matrix.board }}/firmware.lst
+            build_${{ matrix.board }}/firmware.map
+          retention-days: 30
+
+      - name: Verify firmware size (${{ matrix.board }})
+        run: |
+          ELF_SIZE=$(arm-none-eabi-size -B build_${{ matrix.board }}/firmware.elf | tail -1 | awk '{print $1}')
+          FLASH_LIMIT=$([ "${{ matrix.board }}" = "TEENSY41" ] && echo 7936000 || echo 1984000)
+          echo "Firmware size: $ELF_SIZE bytes"
+          echo "Flash limit: $FLASH_LIMIT bytes"
+          if [ $ELF_SIZE -gt $FLASH_LIMIT ]; then
+            echo "ERROR: Firmware exceeds flash size!"
+            exit 1
+          fi
+          echo "Size check passed."
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+
+      - name: Check code formatting
+        run: |
+          find hardware/firmware -name "*.c" -o -name "*.h" | xargs clang-format-18 --dry-run --Werror
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=all --std=c99 --suppress=missingIncludeSystem \
+            -I hardware/firmware \
+            -I hardware/firmware/usb \
+            -I hardware/firmware/protocol \
+            -I hardware/firmware/input \
+            hardware/firmware
+
+  release:
+    needs: [build, lint, static-analysis]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/firmware-TEENSY40/firmware.hex
+            artifacts/firmware-TEENSY40/firmware.bin
+            artifacts/firmware-TEENSY41/firmware.hex
+            artifacts/firmware-TEENSY41/firmware.bin
+          generate_release_notes: true

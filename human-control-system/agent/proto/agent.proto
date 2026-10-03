@@ -2,7 +2,9 @@ syntax = "proto3";
 
 package hcs.agent.v1;
 
-option rust_module = "hcs_agent_proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
 
 // ============================================
 // Input Events

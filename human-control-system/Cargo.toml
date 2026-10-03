@@ -2,12 +2,11 @@
 resolver = "2"
 members = [
     "driver",
-    "agent",
     "brain",
-    "orchestrator",
     "adapters",
+    "orchestrator",
 ]
-exclude = ["vision", "hardware", "tests", "docs", "docker"]
+exclude = ["vision", "hardware", "tests", "docs", "docker", "agent"]
 
 [workspace.dependencies]
 # Core
@@ -41,8 +40,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Diagnostics_Debug",
     "Win32_System_LibraryLoader",
     "Win32_Security",
-], optional = true }
-nix = { version = "0.28", optional = true }
+] }
+nix = { version = "0.28" }
 
 # Async/Utils
 async-trait = "0.1"
@@ -50,16 +49,16 @@ futures = "0.3"
 parking_lot = "0.12"
 dashmap = "5.5"
 crossbeam = "0.8"
-tokio-util = { version = "0.7", features = ["codec", "sync"] }
+tokio-util = { version = "0.7", features = ["codec"] }
 
 # Serialization/Config
 toml = "0.8"
-config = { version = "0.14", features = ["toml", "env"] }
-clap = { version = "4.5", features = ["derive", "env", "yaml"] }
+config = { version = "0.14", features = ["toml"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 
 # WASM
-wasmtime = { version = "25.0", features = ["component-model-async"] }
-wit-component = "0.22"
+wasmtime = { version = "25.0", features = ["component-model", "async"] }
+wit-component = "0.261"
 
 # Crypto/Security
 ring = "0.17"
@@ -77,3 +76,14 @@ rust.rust_2021_prelude_collisions = "warn"
 rust.unused_lifetimes = "warn"
 rust.unused_imports = "warn"
 rust.unused_variables = "warn"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3
+
+[profile.dev]
+debug = true
+overflow-checks = true

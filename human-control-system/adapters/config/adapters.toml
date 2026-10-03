@@ -1,0 +1,82 @@
+# App Adapters Configuration
+
+[server]
+host = "0.0.0.0"
+port = 50054
+max_concurrent_requests = 100
+request_timeout_ms = 30000
+
+[photoshop]
+enabled = true
+# UXP (Unified Extensibility Platform) - modern Photoshop API
+uxp_enabled = true
+uxp_port = 8080
+uxp_host = "localhost"
+# CEP (Common Extensibility Platform) - legacy Photoshop API
+cep_enabled = false
+cep_port = 8888
+cep_host = "localhost"
+# Photoshop executable path (auto-detect if empty)
+photoshop_path = ""
+# Default document settings
+default_width = 1920
+default_height = 1080
+default_resolution = 72.0
+default_color_mode = "RGB"
+
+[chrome]
+enabled = true
+# Chrome DevTools Protocol endpoint
+cdp_endpoint = "http://localhost:9222"
+# Auto-attach to existing Chrome instance
+auto_attach = true
+# Chrome executable path (for launching if not running)
+chrome_path = ""
+# Launch arguments
+launch_args = [
+    "--remote-debugging-port=9222",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-popup-blocking",
+]
+# Default navigation timeout
+navigation_timeout_ms = 30000
+# Default evaluation timeout
+evaluation_timeout_ms = 10000
+
+[game]
+enabled = true
+# Default access rights for process attachment
+default_access = "READ_WRITE"
+# Pattern scan defaults
+scan_max_results = 1000
+scan_chunk_size = 65536
+# Memory allocation defaults
+alloc_protection = "READ_WRITE_EXECUTE"
+alloc_type = "COMMIT_RESERVE"
+# Safety
+require_admin = true
+validate_pointers = true
+
+[window]
+enabled = true
+# Platform-specific settings
+# Windows
+[window.windows]
+use_dwm = true
+capture_cursor = true
+# Linux
+[window.linux]
+use_x11 = true
+use_wayland = false
+capture_cursor = true
+
+[metrics]
+enabled = true
+port = 9092
+path = "/metrics"
+
+[logging]
+level = "info"
+format = "json"

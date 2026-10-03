@@ -26,6 +26,10 @@ uuid = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
 crossbeam = { workspace = true }
+futures = { workspace = true }
+bitflags = { version = "2", features = ["serde"] }
+rand = "0.8"
+serialport = "4"
 
 # Platform specific
 windows = { workspace = true, optional = true }
@@ -34,6 +38,9 @@ nix = { workspace = true, optional = true }
 # Driver communication
 socket2 = "0.5"
 mio = { version = "0.8", features = ["os-poll"] }
+
+# Test utilities
+tempfile = { version = "3.8", optional = true }
 
 [features]
 default = []
@@ -45,19 +52,9 @@ test_utils = ["tempfile"]
 windows = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { workspace = true }
+nix = { workspace = true, features = ["fs"] }
+libc = "0.2"
 
 [build-dependencies]
 cc = "1.0"
 bindgen = "0.69"
-
-[profile.release]
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-strip = true
-opt-level = 3
-
-[profile.dev]
-debug = true
-overflow-checks = true

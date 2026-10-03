@@ -1,0 +1,2181 @@
+syntax = "proto3";
+
+package hcs.adapters.v1;
+
+
+// ============================================
+// Common Types
+// ============================================
+
+message Empty {}
+
+message HealthCheckResponse {
+    enum ServingStatus {
+        SERVING_STATUS_UNSPECIFIED = 0;
+        SERVING_STATUS_SERVING = 1;
+        SERVING_STATUS_NOT_SERVING = 2;
+        SERVING_STATUS_STARTING = 3;
+        SERVING_STATUS_STOPPING = 4;
+    }
+    ServingStatus status = 1;
+    string version = 2;
+    uint64 uptime_seconds = 3;
+    map<string, ComponentHealth> components = 4;
+}
+
+message ComponentHealth {
+    enum ComponentStatus {
+        COMPONENT_STATUS_UNSPECIFIED = 0;
+        COMPONENT_STATUS_HEALTHY = 1;
+        COMPONENT_STATUS_DEGRADED = 2;
+        COMPONENT_STATUS_UNHEALTHY = 3;
+    }
+    ComponentStatus status = 1;
+    string message = 2;
+    map<string, string> details = 3;
+}
+
+// ============================================
+// Photoshop Adapter
+// ============================================
+
+service PhotoshopService {
+    // Document operations
+    rpc CreateDocument(CreateDocumentRequest) returns (DocumentResponse);
+    rpc OpenDocument(OpenDocumentRequest) returns (DocumentResponse);
+    rpc SaveDocument(SaveDocumentRequest) returns (DocumentResponse);
+    rpc CloseDocument(CloseDocumentRequest) returns (DocumentResponse);
+    rpc GetDocumentInfo(GetDocumentInfoRequest) returns (DocumentResponse);
+    rpc ListDocuments(Empty) returns (DocumentList);
+
+    // Layer operations
+    rpc GetLayers(GetLayersRequest) returns (LayerList);
+    rpc CreateLayer(CreateLayerRequest) returns (LayerResponse);
+    rpc DeleteLayer(DeleteLayerRequest) returns (LayerResponse);
+    rpc DuplicateLayer(DuplicateLayerRequest) returns (LayerResponse);
+    rpc MoveLayer(MoveLayerRequest) returns (LayerResponse);
+    rpc SetLayerVisibility(SetLayerVisibilityRequest) returns (LayerResponse);
+    rpc SetLayerOpacity(SetLayerOpacityRequest) returns (LayerResponse);
+    rpc SetLayerBlendMode(SetLayerBlendModeRequest) returns (LayerResponse);
+    rpc GetLayerBounds(GetLayerBoundsRequest) returns (LayerBoundsResponse);
+    rpc ApplyLayerStyle(ApplyLayerStyleRequest) returns (LayerResponse);
+
+    // Adjustments and filters
+    rpc ApplyAdjustment(ApplyAdjustmentRequest) returns (AdjustmentResponse);
+    rpc ApplyFilter(ApplyFilterRequest) returns (FilterResponse);
+
+    // Actions
+    rpc PlayAction(PlayActionRequest) returns (ActionResponse);
+    rpc ListActions(ListActionsRequest) returns (ActionList);
+
+    // Batch processing
+    rpc BatchProcess(BatchProcessRequest) returns (BatchProcessResponse);
+
+    // Export/Import
+    rpc ExportDocument(ExportDocumentRequest) returns (ExportResponse);
+    rpc ImportFile(ImportFileRequest) returns (ImportResponse);
+
+    // Health
+    rpc HealthCheck(Empty) returns (HealthCheckResponse);
+}
+
+// Document
+message CreateDocumentRequest {
+    int32 width = 1;
+    int32 height = 2;
+    float resolution = 3;
+    ColorMode color_mode = 4;
+    BackgroundContents background = 5;
+    string name = 6;
+}
+
+message OpenDocumentRequest {
+    string path = 1;
+}
+
+message SaveDocumentRequest {
+    string document_id = 1;
+    string path = 2;
+    SaveOptions options = 3;
+}
+
+message CloseDocumentRequest {
+    string document_id = 1;
+    bool force = 2;
+}
+
+message GetDocumentInfoRequest {
+    string document_id = 1;
+}
+
+message DocumentResponse {
+    bool success = 1;
+    DocumentInfo document = 2;
+    string error = 3;
+}
+
+message DocumentList {
+    repeated DocumentInfo documents = 1;
+}
+
+message DocumentInfo {
+    string id = 1;
+    string name = 2;
+    string path = 3;
+    int32 width = 4;
+    int32 height = 5;
+    float resolution = 6;
+    ColorMode color_mode = 7;
+    int32 layer_count = 8;
+    bool is_modified = 9;
+    bool is_background_layer = 10;
+}
+
+enum ColorMode {
+    COLOR_MODE_UNSPECIFIED = 0;
+    COLOR_MODE_BITMAP = 1;
+    COLOR_MODE_GRAYSCALE = 2;
+    COLOR_MODE_RGB = 3;
+    COLOR_MODE_CMYK = 4;
+    COLOR_MODE_LAB = 5;
+    COLOR_MODE_MULTICHANNEL = 6;
+    COLOR_MODE_DUOTONE = 7;
+}
+
+enum BackgroundContents {
+    BACKGROUND_CONTENTS_UNSPECIFIED = 0;
+    BACKGROUND_CONTENTS_WHITE = 1;
+    BACKGROUND_CONTENTS_TRANSPARENT = 2;
+    BACKGROUND_CONTENTS_BACKGROUND_COLOR = 3;
+}
+
+message SaveOptions {
+    bool save_as_copy = 1;
+    int32 jpeg_quality = 2;
+    bool maximize_compatibility = 3;
+}
+
+// Layer
+message GetLayersRequest {
+    string document_id = 1;
+}
+
+message CreateLayerRequest {
+    string document_id = 1;
+    string name = 2;
+    LayerKind kind = 3;
+    int32 insert_at = 4; // -1 for top
+}
+
+message DeleteLayerRequest {
+    string document_id = 1;
+    string layer_id = 2;
+}
+
+message DuplicateLayerRequest {
+    string document_id = 1;
+    string layer_id = 2;
+    string new_name = 3;
+    int32 insert_at = 4;
+}
+
+message MoveLayerRequest {
+    string document_id = 1;
+    string layer_id = 2;
+    int32 new_index = 3;
+}
+
+message SetLayerVisibilityRequest {
+    string document_id = 1;
+    string layer_id = 2;
+    bool visible = 3;
+}
+
+message SetLayerOpacityRequest {
+    string document_id = 1;
+    string layer_id = 2;
+    float opacity = 3; // 0.0 - 1.0
+}
+
+message SetLayerBlendModeRequest {
+    string document_id = 1;
+    string layer_id = 2;
+    BlendMode mode = 3;
+}
+
+message GetLayerBoundsRequest {
+    string document_id = 1;
+    string layer_id = 2;
+}
+
+message LayerBoundsResponse {
+    bool success = 1;
+    LayerBounds bounds = 2;
+    string error = 3;
+}
+
+message LayerBounds {
+    int32 x = 1;
+    int32 y = 2;
+    int32 width = 3;
+    int32 height = 4;
+}
+
+message ApplyLayerStyleRequest {
+    string document_id = 1;
+    string layer_id = 2;
+    LayerStyle style = 3;
+}
+
+message LayerResponse {
+    bool success = 1;
+    LayerInfo layer = 2;
+    string error = 3;
+}
+
+message LayerList {
+    repeated LayerInfo layers = 1;
+}
+
+message LayerInfo {
+    string id = 1;
+    string name = 2;
+    LayerKind kind = 3;
+    bool visible = 4;
+    float opacity = 5;
+    BlendMode blend_mode = 6;
+    int32 index = 7;
+    bool is_background = 8;
+    bool is_locked = 9;
+    LayerBounds bounds = 10;
+}
+
+enum LayerKind {
+    LAYER_KIND_UNSPECIFIED = 0;
+    LAYER_KIND_NORMAL = 1;
+    LAYER_KIND_TEXT = 2;
+    LAYER_KIND_SHAPE = 3;
+    LAYER_KIND_SMART_OBJECT = 4;
+    LAYER_KIND_ADJUSTMENT = 5;
+    LAYER_KIND_FILL = 6;
+    LAYER_KIND_GROUP = 7;
+    LAYER_KIND_VIDEO = 8;
+    LAYER_KIND_3D = 9;
+}
+
+enum BlendMode {
+    BLEND_MODE_UNSPECIFIED = 0;
+    BLEND_MODE_NORMAL = 1;
+    BLEND_MODE_MULTIPLY = 2;
+    BLEND_MODE_SCREEN = 3;
+    BLEND_MODE_OVERLAY = 4;
+    BLEND_MODE_SOFT_LIGHT = 5;
+    BLEND_MODE_HARD_LIGHT = 6;
+    BLEND_MODE_COLOR_DODGE = 7;
+    BLEND_MODE_COLOR_BURN = 8;
+    BLEND_MODE_DARKEN = 9;
+    BLEND_MODE_LIGHTEN = 10;
+    BLEND_MODE_DIFFERENCE = 11;
+    BLEND_MODE_EXCLUSION = 12;
+    BLEND_MODE_HUE = 13;
+    BLEND_MODE_SATURATION = 14;
+    BLEND_MODE_COLOR = 15;
+    BLEND_MODE_LUMINOSITY = 16;
+    BLEND_MODE_LINEAR_DODGE = 17;
+    BLEND_MODE_LINEAR_BURN = 18;
+    BLEND_MODE_VIVID_LIGHT = 19;
+    BLEND_MODE_LINEAR_LIGHT = 20;
+    BLEND_MODE_PIN_LIGHT = 21;
+    BLEND_MODE_HARD_MIX = 22;
+    BLEND_MODE_DIVIDE = 23;
+    BLEND_MODE_SUBTRACT = 24;
+}
+
+message LayerStyle {
+    bool drop_shadow = 1;
+    DropShadow drop_shadow_params = 2;
+    bool inner_shadow = 3;
+    InnerShadow inner_shadow_params = 4;
+    bool outer_glow = 5;
+    OuterGlow outer_glow_params = 6;
+    bool inner_glow = 7;
+    InnerGlow inner_glow_params = 8;
+    bool bevel_emboss = 9;
+    BevelEmboss bevel_emboss_params = 10;
+    bool stroke = 11;
+    Stroke stroke_params = 12;
+    bool color_overlay = 13;
+    ColorOverlay color_overlay_params = 14;
+    bool gradient_overlay = 15;
+    GradientOverlay gradient_overlay_params = 16;
+    bool pattern_overlay = 17;
+    PatternOverlay pattern_overlay_params = 18;
+}
+
+message DropShadow {
+    float opacity = 1;
+    float angle = 2;
+    float distance = 3;
+    float spread = 4;
+    float size = 5;
+    int32 color_r = 6;
+    int32 color_g = 7;
+    int32 color_b = 8;
+}
+
+message InnerShadow {
+    float opacity = 1;
+    float angle = 2;
+    float distance = 3;
+    float choke = 4;
+    float size = 5;
+    int32 color_r = 6;
+    int32 color_g = 7;
+    int32 color_b = 8;
+}
+
+message OuterGlow {
+    float opacity = 1;
+    float spread = 2;
+    float size = 3;
+    int32 color_r = 4;
+    int32 color_g = 5;
+    int32 color_b = 6;
+}
+
+message InnerGlow {
+    float opacity = 1;
+    float choke = 2;
+    float size = 3;
+    int32 color_r = 4;
+    int32 color_g = 5;
+    int32 color_b = 6;
+}
+
+message BevelEmboss {
+    BevelStyle style = 1;
+    BevelTechnique technique = 2;
+    float depth = 3;
+    float direction = 4;
+    float size = 5;
+    float soften = 6;
+    float angle = 7;
+    float altitude = 8;
+    HighlightShadow highlight = 9;
+    HighlightShadow shadow = 10;
+}
+
+enum BevelStyle {
+    BEVEL_STYLE_UNSPECIFIED = 0;
+    BEVEL_STYLE_OUTER = 1;
+    BEVEL_STYLE_INNER = 2;
+    BEVEL_STYLE_EMBOSS = 3;
+    BEVEL_STYLE_PILLOW_EMBOSS = 4;
+    BEVEL_STYLE_STROKE_EMBOSS = 5;
+}
+
+enum BevelTechnique {
+    BEVEL_TECHNIQUE_UNSPECIFIED = 0;
+    BEVEL_TECHNIQUE_SMOOTH = 1;
+    BEVEL_TECHNIQUE_CHISEL_HARD = 2;
+    BEVEL_TECHNIQUE_CHISEL_SOFT = 3;
+}
+
+message HighlightShadow {
+    int32 color_r = 1;
+    int32 color_g = 2;
+    int32 color_b = 3;
+    int32 color_a = 4;
+    BlendMode blend_mode = 5;
+    float opacity = 6;
+}
+
+message Stroke {
+    float size = 1;
+    StrokePosition position = 2;
+    BlendMode blend_mode = 3;
+    float opacity = 4;
+    FillType fill_type = 5;
+    ColorFill color = 6;
+    GradientFill gradient = 7;
+    PatternFill pattern = 8;
+}
+
+enum StrokePosition {
+    STROKE_POSITION_UNSPECIFIED = 0;
+    STROKE_POSITION_OUTSIDE = 1;
+    STROKE_POSITION_INSIDE = 2;
+    STROKE_POSITION_CENTER = 3;
+}
+
+enum FillType {
+    FILL_TYPE_UNSPECIFIED = 0;
+    FILL_TYPE_COLOR = 1;
+    FILL_TYPE_GRADIENT = 2;
+    FILL_TYPE_PATTERN = 3;
+}
+
+message ColorFill {
+    int32 r = 1;
+    int32 g = 2;
+    int32 b = 3;
+    int32 a = 4;
+}
+
+message GradientFill {
+    GradientType type = 1;
+    float angle = 2;
+    float scale = 3;
+    repeated GradientStop stops = 4;
+}
+
+enum GradientType {
+    GRADIENT_TYPE_UNSPECIFIED = 0;
+    GRADIENT_TYPE_LINEAR = 1;
+    GRADIENT_TYPE_RADIAL = 2;
+    GRADIENT_TYPE_ANGLE = 3;
+    GRADIENT_TYPE_REFLECTED = 4;
+    GRADIENT_TYPE_DIAMOND = 5;
+}
+
+message GradientStop {
+    float location = 1;
+    int32 r = 2;
+    int32 g = 3;
+    int32 b = 4;
+    int32 a = 5;
+}
+
+message PatternFill {
+    string pattern_name = 1;
+    float scale = 2;
+}
+
+message ColorOverlay {
+    int32 r = 1;
+    int32 g = 2;
+    int32 b = 3;
+    int32 a = 4;
+    BlendMode blend_mode = 5;
+    float opacity = 6;
+}
+
+message GradientOverlay {
+    BlendMode blend_mode = 1;
+    float opacity = 2;
+    GradientFill gradient = 3;
+}
+
+message PatternOverlay {
+    BlendMode blend_mode = 1;
+    float opacity = 2;
+    PatternFill pattern = 3;
+}
+
+// Adjustments
+message ApplyAdjustmentRequest {
+    string document_id = 1;
+    string layer_id = 2; // empty for document-level
+    AdjustmentType type = 3;
+    map<string, string> parameters = 4;
+}
+
+message AdjustmentResponse {
+    bool success = 1;
+    string adjustment_id = 2;
+    string error = 3;
+}
+
+enum AdjustmentType {
+    ADJUSTMENT_TYPE_UNSPECIFIED = 0;
+    ADJUSTMENT_TYPE_BRIGHTNESS_CONTRAST = 1;
+    ADJUSTMENT_TYPE_LEVELS = 2;
+    ADJUSTMENT_TYPE_CURVES = 3;
+    ADJUSTMENT_TYPE_EXPOSURE = 4;
+    ADJUSTMENT_TYPE_VIBRANCE = 5;
+    ADJUSTMENT_TYPE_HUE_SATURATION = 6;
+    ADJUSTMENT_TYPE_COLOR_BALANCE = 7;
+    ADJUSTMENT_TYPE_BLACK_WHITE = 8;
+    ADJUSTMENT_TYPE_PHOTO_FILTER = 9;
+    ADJUSTMENT_TYPE_CHANNEL_MIXER = 10;
+    ADJUSTMENT_TYPE_INVERT = 11;
+    ADJUSTMENT_TYPE_POSTERIZE = 12;
+    ADJUSTMENT_TYPE_THRESHOLD = 13;
+    ADJUSTMENT_TYPE_GRADIENT_MAP = 14;
+    ADJUSTMENT_TYPE_SELECTIVE_COLOR = 15;
+}
+
+// Filters
+message ApplyFilterRequest {
+    string document_id = 1;
+    string layer_id = 2;
+    FilterType type = 3;
+    map<string, string> parameters = 4;
+    bool smart_filter = 5;
+}
+
+message FilterResponse {
+    bool success = 1;
+    string filter_id = 2;
+    string error = 3;
+}
+
+enum FilterType {
+    FILTER_TYPE_UNSPECIFIED = 0;
+    FILTER_TYPE_GAUSSIAN_BLUR = 1;
+    FILTER_TYPE_MOTION_BLUR = 2;
+    FILTER_TYPE_RADIAL_BLUR = 3;
+    FILTER_TYPE_SMART_BLUR = 4;
+    FILTER_TYPE_UNSHARP_MASK = 5;
+    FILTER_TYPE_SHARPEN = 6;
+    FILTER_TYPE_SHARPEN_EDGES = 7;
+    FILTER_TYPE_SHARPEN_MORE = 8;
+    FILTER_TYPE_REDUCE_NOISE = 9;
+    FILTER_TYPE_DESPECKLE = 10;
+    FILTER_TYPE_MEDIAN = 11;
+    FILTER_TYPE_DUST_SCRATCHES = 12;
+    FILTER_TYPE_ADD_NOISE = 13;
+    FILTER_TYPE_EMBOSS = 14;
+    FILTER_TYPE_FIND_EDGES = 15;
+    FILTER_TYPE_HIGH_PASS = 16;
+    FILTER_TYPE_MINIMUM = 17;
+    FILTER_TYPE_MAXIMUM = 18;
+    FILTER_TYPE_OFFSET = 19;
+    FILTER_TYPE_SPHERIZE = 20;
+    FILTER_TYPE_RIPPLE = 21;
+    FILTER_TYPE_WAVE = 22;
+    FILTER_TYPE_ZIGZAG = 23;
+    FILTER_TYPE_LENS_FLARE = 24;
+    FILTER_TYPE_LIGHTING_EFFECTS = 25;
+    FILTER_TYPE_OIL_PAINT = 26;
+    FILTER_TYPE_FILTER_GALLERY = 27;
+}
+
+// Actions
+message PlayActionRequest {
+    string action_name = 1;
+    string action_set = 2;
+    string document_id = 3;
+    map<string, string> parameters = 4;
+}
+
+message ActionResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+message ListActionsRequest {
+    string action_set = 1;
+}
+
+message ActionList {
+    repeated ActionInfo actions = 1;
+}
+
+message ActionInfo {
+    string name = 1;
+    string action_set = 2;
+    bool has_parameters = 3;
+}
+
+// Batch
+message BatchProcessRequest {
+    string action_name = 1;
+    string action_set = 2;
+    repeated string source_files = 3;
+    string destination_folder = 4;
+    BatchOptions options = 5;
+}
+
+message BatchOptions {
+    bool override_open = 1;
+    bool include_subfolders = 2;
+    bool suppress_warnings = 3;
+    string file_naming = 4;
+    SaveOptions save_options = 5;
+}
+
+message BatchProcessResponse {
+    bool success = 1;
+    int32 processed = 2;
+    int32 failed = 3;
+    repeated string errors = 4;
+}
+
+// Export/Import
+message ExportDocumentRequest {
+    string document_id = 1;
+    string path = 2;
+    ExportFormat format = 3;
+    ExportOptions options = 4;
+}
+
+message ExportOptions {
+    int32 quality = 1;
+    bool include_icc_profile = 2;
+    bool convert_to_srgb = 3;
+    bool transparency = 4;
+    int32 png_compression = 5;
+}
+
+enum ExportFormat {
+    EXPORT_FORMAT_UNSPECIFIED = 0;
+    EXPORT_FORMAT_PSD = 1;
+    EXPORT_FORMAT_PSB = 2;
+    EXPORT_FORMAT_JPEG = 3;
+    EXPORT_FORMAT_PNG = 4;
+    EXPORT_FORMAT_TIFF = 5;
+    EXPORT_FORMAT_GIF = 6;
+    EXPORT_FORMAT_BMP = 7;
+    EXPORT_FORMAT_PDF = 8;
+    EXPORT_FORMAT_SVG = 9;
+    EXPORT_FORMAT_WEBP = 10;
+}
+
+message ExportResponse {
+    bool success = 1;
+    string path = 2;
+    string error = 3;
+}
+
+message ImportFileRequest {
+    string path = 1;
+    string document_id = 2; // optional target document
+    ImportOptions options = 3;
+}
+
+message ImportOptions {
+    bool place_as_smart_object = 1;
+    bool convert_to_profile = 2;
+    int32 target_layer_index = 3;
+}
+
+message ImportResponse {
+    bool success = 1;
+    string layer_id = 2;
+    string error = 3;
+}
+
+// ============================================
+// Chrome Adapter (CDP)
+// ============================================
+
+service ChromeService {
+    // Browser lifecycle
+    rpc Connect(ConnectRequest) returns (ConnectResponse);
+    rpc Disconnect(DisconnectRequest) returns (Empty);
+    rpc GetVersion(Empty) returns (VersionResponse);
+    rpc GetTargets(GetTargetsRequest) returns (TargetList);
+
+    // Tab management
+    rpc CreateTab(CreateTabRequest) returns (TabResponse);
+    rpc CloseTab(CloseTabRequest) returns (TabResponse);
+    rpc ActivateTab(ActivateTabRequest) returns (TabResponse);
+    rpc Navigate(NavigateRequest) returns (NavigationResponse);
+    rpc Reload(ReloadRequest) returns (NavigationResponse);
+    rpc GoBack(GoBackRequest) returns (NavigationResponse);
+    rpc GoForward(GoForwardRequest) returns (NavigationResponse);
+    rpc GetTabs(Empty) returns (TabList);
+
+    // DOM interaction
+    rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+    rpc CallFunction(CallFunctionRequest) returns (EvaluateResponse);
+    rpc GetDocument(GetDocumentRequest) returns (NodeResponse);
+    rpc QuerySelector(QuerySelectorRequest) returns (NodeResponse);
+    rpc QuerySelectorAll(QuerySelectorAllRequest) returns (NodeList);
+    rpc ClickElement(ClickElementRequest) returns (ClickResponse);
+    rpc TypeText(TypeTextRequest) returns (TypeResponse);
+    rpc GetElementBounds(GetElementBoundsRequest) returns (ElementBoundsResponse);
+    rpc GetElementAttributes(GetElementAttributesRequest) returns (ElementAttributesResponse);
+    rpc SetElementAttributes(SetElementAttributesRequest) returns (ElementAttributesResponse);
+    rpc ScreenshotElement(ScreenshotElementRequest) returns (ScreenshotResponse);
+    rpc ScrollIntoView(ScrollIntoViewRequest) returns (Empty);
+
+    // Network interception
+    rpc EnableNetwork(EnableNetworkRequest) returns (Empty);
+    rpc DisableNetwork(Empty) returns (Empty);
+    rpc SetRequestInterception(SetRequestInterceptionRequest) returns (Empty);
+    rpc ContinueRequest(ContinueRequestRequest) returns (Empty);
+    rpc ModifyRequest(ModifyRequestRequest) returns (Empty);
+    rpc BlockUrls(BlockUrlsRequest) returns (Empty);
+    rpc GetNetworkLogs(Empty) returns (NetworkLogList);
+
+    // Console
+    rpc EnableConsole(Empty) returns (Empty);
+    rpc DisableConsole(Empty) returns (Empty);
+    rpc GetConsoleLogs(Empty) returns (ConsoleLogList);
+    rpc ClearConsole(Empty) returns (Empty);
+
+    // Screenshots
+    rpc CaptureScreenshot(CaptureScreenshotRequest) returns (ScreenshotResponse);
+    rpc CaptureFullPageScreenshot(CaptureFullPageScreenshotRequest) returns (ScreenshotResponse);
+
+    // Cookies/Storage
+    rpc GetCookies(GetCookiesRequest) returns (CookieList);
+    rpc SetCookie(SetCookieRequest) returns (CookieResponse);
+    rpc DeleteCookie(DeleteCookieRequest) returns (CookieResponse);
+    rpc GetLocalStorage(GetLocalStorageRequest) returns (StorageResponse);
+    rpc SetLocalStorage(SetLocalStorageRequest) returns (StorageResponse);
+
+    // Health
+    rpc HealthCheck(Empty) returns (HealthCheckResponse);
+}
+
+// Browser
+message ConnectRequest {
+    string endpoint = 1; // e.g., "http://localhost:9222"
+    int32 timeout_ms = 2;
+}
+
+message ConnectResponse {
+    bool success = 1;
+    string session_id = 2;
+    string error = 3;
+}
+
+message DisconnectRequest {
+    string session_id = 1;
+}
+
+message VersionResponse {
+    bool success = 1;
+    BrowserVersion version = 2;
+    string error = 3;
+}
+
+message BrowserVersion {
+    string protocol_version = 1;
+    string product = 2;
+    string revision = 3;
+    string user_agent = 4;
+    string js_version = 5;
+}
+
+message GetTargetsRequest {
+    string session_id = 1;
+}
+
+message TargetList {
+    repeated TargetInfo targets = 1;
+}
+
+message TargetInfo {
+    string target_id = 1;
+    TargetType type = 2;
+    string title = 3;
+    string url = 4;
+    bool attached = 5;
+    string opener_id = 6;
+}
+
+enum TargetType {
+    TARGET_TYPE_UNSPECIFIED = 0;
+    TARGET_TYPE_PAGE = 1;
+    TARGET_TYPE_BACKGROUND_PAGE = 2;
+    TARGET_TYPE_SERVICE_WORKER = 3;
+    TARGET_TYPE_SHARED_WORKER = 4;
+    TARGET_TYPE_IFRAME = 5;
+    TARGET_TYPE_WORKER = 6;
+    TARGET_TYPE_OTHER = 7;
+}
+
+// Tabs
+message CreateTabRequest {
+    string session_id = 1;
+    string url = 2;
+    bool background = 3;
+}
+
+message CloseTabRequest {
+    string session_id = 1;
+    string target_id = 2;
+}
+
+message ActivateTabRequest {
+    string session_id = 1;
+    string target_id = 2;
+}
+
+message TabResponse {
+    bool success = 1;
+    TabInfo tab = 2;
+    string error = 3;
+}
+
+message TabList {
+    repeated TabInfo tabs = 1;
+}
+
+message TabInfo {
+    string target_id = 1;
+    string title = 2;
+    string url = 3;
+    bool is_active = 4;
+    bool is_loading = 5;
+    string favicon_url = 6;
+}
+
+message NavigateRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string url = 3;
+    NavigationOptions options = 4;
+}
+
+message NavigationOptions {
+    int32 timeout_ms = 1;
+    bool wait_until_load = 2;
+    bool wait_until_domcontentloaded = 3;
+    bool wait_until_networkidle = 4;
+    string referrer = 5;
+    map<string, string> headers = 6;
+}
+
+message NavigationResponse {
+    bool success = 1;
+    string frame_id = 2;
+    string loader_id = 3;
+    NavigationError error = 4;
+}
+
+message NavigationError {
+    string error_text = 1;
+    int32 error_code = 2;
+}
+
+message ReloadRequest {
+    string session_id = 1;
+    string target_id = 2;
+    bool ignore_cache = 3;
+}
+
+message GoBackRequest {
+    string session_id = 1;
+    string target_id = 2;
+}
+
+message GoForwardRequest {
+    string session_id = 1;
+    string target_id = 2;
+}
+
+// DOM
+message EvaluateRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string expression = 3;
+    EvaluateOptions options = 4;
+}
+
+message EvaluateOptions {
+    bool return_by_value = 1;
+    bool await_promise = 2;
+    bool user_gesture = 3;
+    string object_group = 4;
+    bool include_command_line_api = 5;
+    bool silent = 6;
+    int32 timeout_ms = 7;
+}
+
+message EvaluateResponse {
+    bool success = 1;
+    RemoteObject result = 2;
+    ExceptionDetails exception = 3;
+    string error = 4;
+}
+
+message RemoteObject {
+    RemoteObjectType type = 1;
+    string subtype = 2;
+    string class_name = 3;
+    string value = 4; // JSON stringified
+    string object_id = 5;
+    string description = 6;
+    int32 preview_length = 7;
+}
+
+enum RemoteObjectType {
+    REMOTE_OBJECT_TYPE_UNSPECIFIED = 0;
+    REMOTE_OBJECT_TYPE_OBJECT = 1;
+    REMOTE_OBJECT_TYPE_FUNCTION = 2;
+    REMOTE_OBJECT_TYPE_UNDEFINED = 3;
+    REMOTE_OBJECT_TYPE_STRING = 4;
+    REMOTE_OBJECT_TYPE_NUMBER = 5;
+    REMOTE_OBJECT_TYPE_BOOLEAN = 6;
+    REMOTE_OBJECT_TYPE_SYMBOL = 7;
+    REMOTE_OBJECT_TYPE_BIGINT = 8;
+}
+
+message ExceptionDetails {
+    int32 exception_id = 1;
+    string text = 2;
+    string line_number = 3;
+    string column_number = 4;
+    string script_id = 5;
+    string url = 8;
+    RemoteObject exception = 6;
+    string stack_trace = 7;
+}
+
+message CallFunctionRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string function_declaration = 3;
+    repeated RemoteObject arguments = 4;
+    EvaluateOptions options = 5;
+}
+
+message GetDocumentRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int32 depth = 3;
+    bool pierce = 4;
+}
+
+message NodeResponse {
+    bool success = 1;
+    NodeInfo node = 2;
+    string error = 3;
+}
+
+message NodeList {
+    repeated NodeInfo nodes = 1;
+}
+
+message NodeInfo {
+    int64 node_id = 1;
+    NodeType node_type = 2;
+    string node_name = 3;
+    string local_name = 4;
+    string node_value = 5;
+    int32 child_count = 6;
+    repeated NodeInfo children = 7;
+    map<string, string> attributes = 8;
+    string frame_id = 9;
+    int32 depth = 10;
+}
+
+enum NodeType {
+    NODE_TYPE_UNSPECIFIED = 0;
+    NODE_TYPE_ELEMENT = 1;
+    NODE_TYPE_TEXT = 2;
+    NODE_TYPE_COMMENT = 3;
+    NODE_TYPE_DOCUMENT = 4;
+    NODE_TYPE_DOCUMENT_TYPE = 5;
+    NODE_TYPE_DOCUMENT_FRAGMENT = 6;
+    NODE_TYPE_CDATA_SECTION = 7;
+}
+
+message QuerySelectorRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string selector = 3;
+    int64 node_id = 4; // 0 for document
+}
+
+message QuerySelectorAllRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string selector = 3;
+    int64 node_id = 4;
+}
+
+message ClickElementRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int64 node_id = 3;
+    ClickOptions options = 4;
+}
+
+message ClickOptions {
+    ClickType click_type = 1;
+    int32 button = 2; // 0=left, 1=middle, 2=right
+    int32 click_count = 3;
+    int32 x = 4;
+    int32 y = 5;
+    bool alt_key = 6;
+    bool ctrl_key = 7;
+    bool meta_key = 8;
+    bool shift_key = 9;
+}
+
+enum ClickType {
+    CLICK_TYPE_UNSPECIFIED = 0;
+    CLICK_TYPE_CLICK = 1;
+    CLICK_TYPE_DOUBLE_CLICK = 2;
+    CLICK_TYPE_MOUSE_DOWN = 3;
+    CLICK_TYPE_MOUSE_UP = 4;
+    CLICK_TYPE_MOUSE_MOVE = 5;
+}
+
+message ClickResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+message TypeTextRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int64 node_id = 3;
+    string text = 4;
+    TypeOptions options = 5;
+}
+
+message TypeOptions {
+    int32 delay_ms = 1;
+    bool clear_first = 2;
+}
+
+message TypeResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+message GetElementBoundsRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int64 node_id = 3;
+}
+
+message ElementBoundsResponse {
+    bool success = 1;
+    ElementBounds bounds = 2;
+    string error = 3;
+}
+
+message ElementBounds {
+    float x = 1;
+    float y = 2;
+    float width = 3;
+    float height = 4;
+    float top = 5;
+    float left = 6;
+    float bottom = 7;
+    float right = 8;
+}
+
+message GetElementAttributesRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int64 node_id = 3;
+}
+
+message ElementAttributesResponse {
+    bool success = 1;
+    map<string, string> attributes = 2;
+    string error = 3;
+}
+
+message SetElementAttributesRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int64 node_id = 3;
+    map<string, string> attributes = 4;
+}
+
+message ScreenshotElementRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int64 node_id = 3;
+    ImageFormat format = 4;
+    int32 quality = 5;
+}
+
+message ScrollIntoViewRequest {
+    string session_id = 1;
+    string target_id = 2;
+    int64 node_id = 3;
+}
+
+// Network
+message EnableNetworkRequest {
+    string session_id = 1;
+    repeated string patterns = 2; // URL patterns to intercept
+}
+
+message SetRequestInterceptionRequest {
+    string session_id = 1;
+    string target_id = 2;
+    repeated RequestPattern patterns = 3;
+}
+
+message RequestPattern {
+    string url_pattern = 1;
+    ResourceType resource_type = 2;
+    InterceptionStage stage = 3;
+}
+
+enum ResourceType {
+    RESOURCE_TYPE_UNSPECIFIED = 0;
+    RESOURCE_TYPE_DOCUMENT = 1;
+    RESOURCE_TYPE_STYLESHEET = 2;
+    RESOURCE_TYPE_IMAGE = 3;
+    RESOURCE_TYPE_MEDIA = 4;
+    RESOURCE_TYPE_FONT = 5;
+    RESOURCE_TYPE_SCRIPT = 6;
+    RESOURCE_TYPE_TEXT_TRACK = 7;
+    RESOURCE_TYPE_XHR = 8;
+    RESOURCE_TYPE_FETCH = 9;
+    RESOURCE_TYPE_EVENT_SOURCE = 10;
+    RESOURCE_TYPE_WEBSOCKET = 11;
+    RESOURCE_TYPE_MANIFEST = 12;
+    RESOURCE_TYPE_OTHER = 13;
+}
+
+enum InterceptionStage {
+    INTERCEPTION_STAGE_UNSPECIFIED = 0;
+    INTERCEPTION_STAGE_REQUEST = 1;
+    INTERCEPTION_STAGE_HEADERS_RECEIVED = 2;
+    INTERCEPTION_STAGE_RESPONSE = 3;
+}
+
+message ContinueRequestRequest {
+    string session_id = 1;
+    string interception_id = 2;
+    bool allow = 3;
+    RequestModification modification = 4;
+}
+
+message RequestModification {
+    string url = 1;
+    string method = 2;
+    map<string, string> headers = 3;
+    string post_data = 4;
+}
+
+message ModifyRequestRequest {
+    string session_id = 1;
+    string interception_id = 2;
+    RequestModification modification = 3;
+}
+
+message BlockUrlsRequest {
+    string session_id = 1;
+    repeated string url_patterns = 2;
+}
+
+message NetworkLogList {
+    repeated NetworkLogEntry logs = 1;
+}
+
+message NetworkLogEntry {
+    string request_id = 1;
+    string url = 2;
+    string method = 3;
+    map<string, string> request_headers = 4;
+    string post_data = 5;
+    int32 status_code = 6;
+    map<string, string> response_headers = 7;
+    string mime_type = 8;
+    int64 timestamp = 9;
+    int64 duration_ms = 10;
+    bool from_cache = 11;
+}
+
+// Console
+message ConsoleLogList {
+    repeated ConsoleLogEntry logs = 1;
+}
+
+message ConsoleLogEntry {
+    string source = 1;
+    LogLevel level = 2;
+    string text = 3;
+    string url = 4;
+    int32 line_number = 5;
+    int32 column_number = 6;
+    int64 timestamp = 7;
+    repeated RemoteObject args = 8;
+}
+
+enum LogLevel {
+    LOG_LEVEL_UNSPECIFIED = 0;
+    LOG_LEVEL_VERBOSE = 1;
+    LOG_LEVEL_INFO = 2;
+    LOG_LEVEL_WARNING = 3;
+    LOG_LEVEL_ERROR = 4;
+}
+
+// Screenshots
+message Region {
+    double x = 1;
+    double y = 2;
+    double width = 3;
+    double height = 4;
+    double scale = 5;
+}
+
+message CaptureScreenshotRequest {
+    string session_id = 1;
+    string target_id = 2;
+    ImageFormat format = 3;
+    int32 quality = 4;
+    Region clip = 5;
+    bool from_surface = 6;
+    bool capture_beyond_viewport = 7;
+}
+
+message CaptureFullPageScreenshotRequest {
+    string session_id = 1;
+    string target_id = 2;
+    ImageFormat format = 3;
+    int32 quality = 4;
+}
+
+message ScreenshotResponse {
+    bool success = 1;
+    bytes image_data = 2;
+    ImageFormat format = 3;
+    int32 width = 4;
+    int32 height = 6;
+    string error = 5;
+}
+
+// Cookies/Storage
+message GetCookiesRequest {
+    string session_id = 1;
+    string target_id = 2;
+    repeated string urls = 3;
+}
+
+message CookieList {
+    repeated Cookie cookies = 1;
+}
+
+message Cookie {
+    string name = 1;
+    string value = 2;
+    string domain = 3;
+    string path = 4;
+    int64 expires = 5;
+    int32 size = 6;
+    bool http_only = 7;
+    bool secure = 8;
+    CookieSameSite same_site = 9;
+    CookiePriority priority = 10;
+}
+
+enum CookieSameSite {
+    COOKIE_SAME_SITE_UNSPECIFIED = 0;
+    COOKIE_SAME_SITE_STRICT = 1;
+    COOKIE_SAME_SITE_LAX = 2;
+    COOKIE_SAME_SITE_NONE = 3;
+}
+
+enum CookiePriority {
+    COOKIE_PRIORITY_UNSPECIFIED = 0;
+    COOKIE_PRIORITY_LOW = 1;
+    COOKIE_PRIORITY_MEDIUM = 2;
+    COOKIE_PRIORITY_HIGH = 3;
+}
+
+message SetCookieRequest {
+    string session_id = 1;
+    string target_id = 2;
+    Cookie cookie = 3;
+}
+
+message CookieResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+message DeleteCookieRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string cookie_name = 3;
+    string url = 4;
+}
+
+message GetLocalStorageRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string origin = 3;
+}
+
+message SetLocalStorageRequest {
+    string session_id = 1;
+    string target_id = 2;
+    string origin = 3;
+    map<string, string> items = 4;
+}
+
+message StorageResponse {
+    bool success = 1;
+    map<string, string> items = 2;
+    string error = 3;
+}
+
+// ============================================
+// Game Memory Adapter
+// ============================================
+
+service GameService {
+    // Process attachment
+    rpc AttachProcess(AttachProcessRequest) returns (AttachResponse);
+    rpc DetachProcess(DetachProcessRequest) returns (Empty);
+    rpc GetProcessInfo(GetProcessInfoRequest) returns (ProcessInfoResponse);
+    rpc ListProcesses(ListProcessesRequest) returns (ProcessList);
+    rpc FindProcessByName(FindProcessByNameRequest) returns (ProcessInfoResponse);
+    rpc FindProcessByWindow(FindProcessByWindowRequest) returns (ProcessInfoResponse);
+
+    // Memory reading
+    rpc ReadMemory(ReadMemoryRequest) returns (ReadMemoryResponse);
+    rpc ReadPointerChain(ReadPointerChainRequest) returns (ReadMemoryResponse);
+    rpc ReadString(ReadStringRequest) returns (ReadStringResponse);
+    rpc ReadStruct(ReadStructRequest) returns (ReadStructResponse);
+
+    // Memory writing
+    rpc WriteMemory(WriteMemoryRequest) returns (WriteMemoryResponse);
+    rpc WritePointerChain(WritePointerChainRequest) returns (WriteMemoryResponse);
+    rpc WriteString(WriteStringRequest) returns (WriteMemoryResponse);
+    rpc WriteStruct(WriteStructRequest) returns (WriteMemoryResponse);
+
+    // Pattern scanning
+    rpc ScanPattern(ScanPatternRequest) returns (ScanPatternResponse);
+    rpc ScanPatternModule(ScanPatternModuleRequest) returns (ScanPatternResponse);
+    rpc FindPattern(FindPatternRequest) returns (FindPatternResponse);
+
+    // Code injection
+    rpc AllocateMemory(AllocateMemoryRequest) returns (AllocateMemoryResponse);
+    rpc FreeMemory(FreeMemoryRequest) returns (Empty);
+    rpc InjectCode(InjectCodeRequest) returns (InjectCodeResponse);
+    rpc CreateThread(CreateThreadRequest) returns (CreateThreadResponse);
+    rpc InjectDll(InjectDllRequest) returns (InjectDllResponse);
+    rpc SetHook(SetHookRequest) returns (HookResponse);
+    rpc RemoveHook(RemoveHookRequest) returns (HookResponse);
+
+    // Modules
+    rpc GetModules(Empty) returns (ModuleList);
+    rpc GetModuleBase(GetModuleBaseRequest) returns (ModuleBaseResponse);
+    rpc GetModuleExport(GetModuleExportRequest) returns (ModuleExportResponse);
+
+    // Health
+    rpc HealthCheck(Empty) returns (HealthCheckResponse);
+}
+
+// Process
+message AttachProcessRequest {
+    uint32 pid = 1;
+    AccessRights access = 2;
+}
+
+enum AccessRights {
+    ACCESS_RIGHTS_UNSPECIFIED = 0;
+    ACCESS_RIGHTS_READ = 1;
+    ACCESS_RIGHTS_WRITE = 2;
+    ACCESS_RIGHTS_READ_WRITE = 3;
+    ACCESS_RIGHTS_ALL = 4;
+}
+
+message AttachResponse {
+    bool success = 1;
+    uint32 pid = 2;
+    string process_name = 3;
+    string error = 4;
+}
+
+message DetachProcessRequest {
+    uint32 pid = 1;
+}
+
+message GetProcessInfoRequest {
+    uint32 pid = 1;
+}
+
+message ProcessInfoResponse {
+    bool success = 1;
+    ProcessInfo process = 2;
+    string error = 3;
+}
+
+message ProcessInfo {
+    uint32 pid = 1;
+    string name = 2;
+    string path = 3;
+    uint64 base_address = 4;
+    Architecture arch = 5;
+    bool is_64bit = 6;
+    uint32 parent_pid = 7;
+    uint32 session_id = 8;
+    uint64 memory_usage = 9;
+    string command_line = 10;
+}
+
+enum Architecture {
+    ARCHITECTURE_UNSPECIFIED = 0;
+    ARCHITECTURE_X86 = 1;
+    ARCHITECTURE_X64 = 2;
+    ARCHITECTURE_ARM = 3;
+    ARCHITECTURE_ARM64 = 4;
+}
+
+message ListProcessesRequest {
+    string name_filter = 1;
+}
+
+message ProcessList {
+    repeated ProcessInfo processes = 1;
+}
+
+message FindProcessByNameRequest {
+    string name = 1;
+}
+
+message FindProcessByWindowRequest {
+    string window_title = 1;
+    string class_name = 2;
+}
+
+// Memory
+message ReadMemoryRequest {
+    uint32 pid = 1;
+    uint64 address = 2;
+    uint32 size = 3;
+}
+
+message ReadMemoryResponse {
+    bool success = 1;
+    bytes data = 2;
+    string error = 3;
+}
+
+message ReadPointerChainRequest {
+    uint32 pid = 1;
+    uint64 base_address = 2;
+    repeated uint64 offsets = 3;
+    uint32 size = 4;
+}
+
+message ReadStringRequest {
+    uint32 pid = 1;
+    uint64 address = 2;
+    uint32 max_length = 3;
+    StringEncoding encoding = 4;
+}
+
+enum StringEncoding {
+    STRING_ENCODING_UNSPECIFIED = 0;
+    STRING_ENCODING_ASCII = 1;
+    STRING_ENCODING_UTF8 = 2;
+    STRING_ENCODING_UTF16 = 3;
+    STRING_ENCODING_UTF16LE = 4;
+    STRING_ENCODING_UTF16BE = 5;
+}
+
+message ReadStringResponse {
+    bool success = 1;
+    string value = 2;
+    string error = 3;
+}
+
+message ReadStructRequest {
+    uint32 pid = 1;
+    uint64 address = 2;
+    string struct_definition = 3; // JSON struct definition
+}
+
+message ReadStructResponse {
+    bool success = 1;
+    string json_value = 2; // JSON serialized struct
+    string error = 3;
+}
+
+message WriteMemoryRequest {
+    uint32 pid = 1;
+    uint64 address = 2;
+    bytes data = 3;
+}
+
+message WriteMemoryResponse {
+    bool success = 1;
+    uint32 bytes_written = 2;
+    string error = 3;
+}
+
+message WritePointerChainRequest {
+    uint32 pid = 1;
+    uint64 base_address = 2;
+    repeated uint64 offsets = 3;
+    bytes data = 4;
+}
+
+message WriteStringRequest {
+    uint32 pid = 1;
+    uint64 address = 2;
+    string value = 3;
+    StringEncoding encoding = 4;
+}
+
+message WriteStructRequest {
+    uint32 pid = 1;
+    uint64 address = 2;
+    string json_value = 3; // JSON serialized struct
+    string struct_definition = 4;
+}
+
+// Pattern scanning
+message ScanPatternRequest {
+    uint32 pid = 1;
+    string pattern = 2; // IDA-style pattern (e.g., "48 8B 05 ?? ?? ?? ?? 48 85 C0")
+    uint64 start_address = 3;
+    uint64 end_address = 4;
+    ScanOptions options = 5;
+}
+
+message ScanPatternModuleRequest {
+    uint32 pid = 1;
+    string module_name = 2;
+    string pattern = 3;
+    ScanOptions options = 4;
+}
+
+message ScanOptions {
+    bool writable = 1;
+    bool executable = 2;
+    bool readable = 3;
+    int32 max_results = 4;
+    bool case_sensitive = 5;
+}
+
+message ScanPatternResponse {
+    bool success = 1;
+    repeated uint64 addresses = 2;
+    string error = 3;
+}
+
+message FindPatternRequest {
+    uint32 pid = 1;
+    bytes pattern = 2;
+    string mask = 3; // 'x' for match, '?' for wildcard
+    uint64 start_address = 4;
+    uint64 end_address = 5;
+}
+
+message FindPatternResponse {
+    bool success = 1;
+    repeated uint64 addresses = 2;
+    string error = 3;
+}
+
+// Code injection
+message AllocateMemoryRequest {
+    uint32 pid = 1;
+    uint32 size = 2;
+    MemoryProtection protection = 3;
+    AllocationType type = 4;
+    uint64 preferred_address = 5;
+}
+
+enum MemoryProtection {
+    MEMORY_PROTECTION_UNSPECIFIED = 0;
+    MEMORY_PROTECTION_READ = 1;
+    MEMORY_PROTECTION_WRITE = 2;
+    MEMORY_PROTECTION_EXECUTE = 3;
+    MEMORY_PROTECTION_READ_WRITE = 4;
+    MEMORY_PROTECTION_READ_EXECUTE = 5;
+    MEMORY_PROTECTION_READ_WRITE_EXECUTE = 6;
+    MEMORY_PROTECTION_NO_ACCESS = 7;
+}
+
+enum AllocationType {
+    ALLOCATION_TYPE_UNSPECIFIED = 0;
+    ALLOCATION_TYPE_COMMIT = 1;
+    ALLOCATION_TYPE_RESERVE = 2;
+    ALLOCATION_TYPE_COMMIT_RESERVE = 3;
+}
+
+message AllocateMemoryResponse {
+    bool success = 1;
+    uint64 address = 2;
+    string error = 3;
+}
+
+message FreeMemoryRequest {
+    uint32 pid = 1;
+    uint64 address = 2;
+    uint32 size = 3;
+}
+
+message InjectCodeRequest {
+    uint32 pid = 1;
+    bytes shellcode = 2;
+    uint64 target_address = 3; // optional, auto-allocate if 0
+    InjectOptions options = 4;
+}
+
+message InjectOptions {
+    bool create_thread = 1;
+    bool suspend_thread = 2;
+    uint64 parameter = 3;
+    bool restore_context = 4;
+}
+
+message InjectCodeResponse {
+    bool success = 1;
+    uint64 allocated_address = 2;
+    uint32 thread_id = 3;
+    string error = 4;
+}
+
+message CreateThreadRequest {
+    uint32 pid = 1;
+    uint64 start_address = 2;
+    uint64 parameter = 3;
+    bool suspended = 4;
+}
+
+message CreateThreadResponse {
+    bool success = 1;
+    uint32 thread_id = 2;
+    uint64 thread_handle = 3;
+    string error = 4;
+}
+
+message InjectDllRequest {
+    uint32 pid = 1;
+    string dll_path = 2;
+    InjectionMethod method = 3;
+}
+
+enum InjectionMethod {
+    INJECTION_METHOD_UNSPECIFIED = 0;
+    INJECTION_METHOD_LOAD_LIBRARY = 1;
+    INJECTION_METHOD_MANUAL_MAPPING = 2;
+    INJECTION_METHOD_THREAD_HIJACKING = 3;
+}
+
+message InjectDllResponse {
+    bool success = 1;
+    uint64 base_address = 2;
+    string error = 3;
+}
+
+message SetHookRequest {
+    uint32 pid = 1;
+    uint64 target_address = 2;
+    uint64 detour_address = 3;
+    HookType type = 4;
+    HookOptions options = 5;
+}
+
+enum HookType {
+    HOOK_TYPE_UNSPECIFIED = 0;
+    HOOK_TYPE_JMP = 1;
+    HOOK_TYPE_CALL = 2;
+    HOOK_TYPE_VEH = 3; // Vectored Exception Handler
+    HOOK_TYPE_IAT = 4; // Import Address Table
+    HOOK_TYPE_INLINE = 5;
+}
+
+message HookOptions {
+    bool auto_enable = 1;
+    uint32 original_bytes_size = 2;
+}
+
+message HookResponse {
+    bool success = 1;
+    uint64 hook_id = 2;
+    bytes original_bytes = 3;
+    string error = 4;
+}
+
+message RemoveHookRequest {
+    uint32 pid = 1;
+    uint64 hook_id = 2;
+}
+
+// Modules
+message ModuleList {
+    repeated ModuleInfo modules = 1;
+}
+
+message ModuleInfo {
+    string name = 1;
+    uint64 base_address = 2;
+    uint32 size = 3;
+    string path = 4;
+    bool is_main = 5;
+    Architecture arch = 6;
+}
+
+message GetModuleBaseRequest {
+    uint32 pid = 1;
+    string module_name = 2;
+}
+
+message ModuleBaseResponse {
+    bool success = 1;
+    uint64 base_address = 2;
+    string error = 3;
+}
+
+message GetModuleExportRequest {
+    uint32 pid = 1;
+    string module_name = 3;
+    string export_name = 2;
+}
+
+message ModuleExportResponse {
+    bool success = 1;
+    uint64 address = 2;
+    string error = 3;
+}
+
+// ============================================
+// Window Manager Adapter
+// ============================================
+
+service WindowService {
+    // Window enumeration
+    rpc ListWindows(ListWindowsRequest) returns (WindowList);
+    rpc GetWindow(GetWindowRequest) returns (WindowResponse);
+    rpc FindWindow(FindWindowRequest) returns (WindowResponse);
+    rpc GetForegroundWindow(Empty) returns (WindowResponse);
+    rpc GetDesktopWindow(Empty) returns (WindowResponse);
+    rpc GetShellWindow(Empty) returns (WindowResponse);
+
+    // Window state
+    rpc FocusWindow(FocusWindowRequest) returns (WindowResponse);
+    rpc ActivateWindow(ActivateWindowRequest) returns (WindowResponse);
+    rpc ShowWindow(ShowWindowRequest) returns (WindowResponse);
+    rpc HideWindow(HideWindowRequest) returns (WindowResponse);
+    rpc MinimizeWindow(MinimizeWindowRequest) returns (WindowResponse);
+    rpc MaximizeWindow(MaximizeWindowRequest) returns (WindowResponse);
+    rpc RestoreWindow(RestoreWindowRequest) returns (WindowResponse);
+    rpc CloseWindow(CloseWindowRequest) returns (WindowResponse);
+    rpc IsWindowVisible(IsWindowVisibleRequest) returns (WindowVisibilityResponse);
+    rpc IsWindowEnabled(IsWindowEnabledRequest) returns (WindowEnabledResponse);
+    rpc GetWindowState(GetWindowStateRequest) returns (WindowStateResponse);
+
+    // Position/Size
+    rpc MoveWindow(MoveWindowRequest) returns (WindowResponse);
+    rpc ResizeWindow(ResizeWindowRequest) returns (WindowResponse);
+    rpc MoveResizeWindow(MoveResizeWindowRequest) returns (WindowResponse);
+    rpc GetWindowRect(GetWindowRectRequest) returns (WindowRectResponse);
+    rpc GetClientRect(GetClientRectRequest) returns (WindowRectResponse);
+    rpc SetWindowPos(SetWindowPosRequest) returns (WindowResponse);
+
+    // Screenshot
+    rpc CaptureWindow(CaptureWindowRequest) returns (ScreenshotResponse);
+    rpc CaptureClientArea(CaptureClientAreaRequest) returns (ScreenshotResponse);
+    rpc CaptureRegion(CaptureRegionRequest) returns (ScreenshotResponse);
+
+    // Window properties
+    rpc GetWindowTitle(GetWindowTitleRequest) returns (WindowTitleResponse);
+    rpc SetWindowTitle(SetWindowTitleRequest) returns (WindowResponse);
+    rpc GetWindowClass(GetWindowClassRequest) returns (WindowClassResponse);
+    rpc GetWindowProcessId(GetWindowProcessIdRequest) returns (WindowProcessIdResponse);
+    rpc GetWindowStyles(GetWindowStylesRequest) returns (WindowStylesResponse);
+    rpc SetWindowStyles(SetWindowStylesRequest) returns (WindowResponse);
+    rpc GetWindowExStyles(GetWindowExStylesRequest) returns (WindowStylesResponse);
+    rpc SetWindowExStyles(SetWindowExStylesRequest) returns (WindowResponse);
+
+    // Z-order
+    rpc BringToTop(BringToTopRequest) returns (WindowResponse);
+    rpc SendToBottom(SendToBottomRequest) returns (WindowResponse);
+    rpc SetWindowZOrder(SetWindowZOrderRequest) returns (WindowResponse);
+
+    // Input
+    rpc SetFocus(SetFocusRequest) returns (WindowResponse);
+    rpc GetFocus(Empty) returns (WindowResponse);
+    rpc PostMessage(PostMessageRequest) returns (MessageResponse);
+    rpc SendMessage(SendMessageRequest) returns (MessageResponse);
+
+    // Multi-monitor
+    rpc GetMonitors(Empty) returns (MonitorList);
+    rpc GetWindowMonitor(GetWindowMonitorRequest) returns (MonitorResponse);
+
+    // Health
+    rpc HealthCheck(Empty) returns (HealthCheckResponse);
+}
+
+// Window
+message ListWindowsRequest {
+    bool visible_only = 1;
+    bool enabled_only = 2;
+    string class_filter = 3;
+    string title_filter = 4;
+    uint32 process_id_filter = 5;
+}
+
+message WindowList {
+    repeated WindowInfo windows = 1;
+}
+
+message WindowInfo {
+    uint64 handle = 1;
+    string title = 2;
+    string class_name = 3;
+    uint32 process_id = 4;
+    uint32 thread_id = 5;
+    WindowRect rect = 6;
+    WindowRect client_rect = 7;
+    bool is_visible = 8;
+    bool is_enabled = 9;
+    bool is_minimized = 10;
+    bool is_maximized = 11;
+    bool is_foreground = 12;
+    WindowStyles styles = 13;
+    WindowStyles ex_styles = 14;
+    int32 z_order = 15;
+    uint64 parent_handle = 16;
+    uint64 owner_handle = 17;
+}
+
+message WindowRect {
+    int32 left = 1;
+    int32 top = 2;
+    int32 right = 3;
+    int32 bottom = 4;
+    int32 width = 5;
+    int32 height = 6;
+}
+
+message WindowStyles {
+    uint32 style = 1;
+    bool ws_overlapped = 2;
+    bool ws_popup = 3;
+    bool ws_child = 4;
+    bool ws_minimize = 5;
+    bool ws_maximize = 6;
+    bool ws_caption = 7;
+    bool ws_border = 8;
+    bool ws_dlgframe = 9;
+    bool ws_vscroll = 10;
+    bool ws_hscroll = 11;
+    bool ws_sysmenu = 12;
+    bool ws_thickframe = 13;
+    bool ws_group = 14;
+    bool ws_tabstop = 15;
+    bool ws_minimizebox = 16;
+    bool ws_maximizebox = 17;
+    bool ws_disabled = 18;
+    bool ws_visible = 19;
+    bool ws_clipchildren = 20;
+    bool ws_clipsiblings = 21;
+}
+
+message GetWindowRequest {
+    uint64 handle = 1;
+}
+
+message WindowResponse {
+    bool success = 1;
+    WindowInfo window = 2;
+    string error = 3;
+}
+
+message FindWindowRequest {
+    string class_name = 1;
+    string window_title = 2;
+}
+
+message FocusWindowRequest {
+    uint64 handle = 1;
+}
+
+message ActivateWindowRequest {
+    uint64 handle = 1;
+}
+
+message ShowWindowRequest {
+    uint64 handle = 1;
+    ShowCommand command = 2;
+}
+
+enum ShowCommand {
+    option allow_alias = true;
+    SHOW_COMMAND_UNSPECIFIED = 0;
+    SHOW_COMMAND_HIDE = 0;
+    SHOW_COMMAND_NORMAL = 1;
+    SHOW_COMMAND_MINIMIZED = 2;
+    SHOW_COMMAND_MAXIMIZED = 3;
+    SHOW_COMMAND_SHOW_NOACTIVATE = 4;
+    SHOW_COMMAND_SHOW = 5;
+    SHOW_COMMAND_MINIMIZE = 6;
+    SHOW_COMMAND_SHOW_MINNOACTIVE = 7;
+    SHOW_COMMAND_SHOW_NA = 8;
+    SHOW_COMMAND_RESTORE = 9;
+    SHOW_COMMAND_SHOW_DEFAULT = 10;
+    SHOW_COMMAND_FORCE_MINIMIZE = 11;
+}
+
+message HideWindowRequest {
+    uint64 handle = 1;
+}
+
+message MinimizeWindowRequest {
+    uint64 handle = 1;
+}
+
+message MaximizeWindowRequest {
+    uint64 handle = 1;
+}
+
+message RestoreWindowRequest {
+    uint64 handle = 1;
+}
+
+message CloseWindowRequest {
+    uint64 handle = 1;
+}
+
+message IsWindowVisibleRequest {
+    uint64 handle = 1;
+}
+
+message WindowVisibilityResponse {
+    bool success = 1;
+    bool visible = 2;
+    string error = 3;
+}
+
+message IsWindowEnabledRequest {
+    uint64 handle = 1;
+}
+
+message WindowEnabledResponse {
+    bool success = 1;
+    bool enabled = 2;
+    string error = 3;
+}
+
+message GetWindowStateRequest {
+    uint64 handle = 1;
+}
+
+message WindowStateResponse {
+    bool success = 1;
+    WindowState state = 2;
+    string error = 3;
+}
+
+enum WindowState {
+    WINDOW_STATE_UNSPECIFIED = 0;
+    WINDOW_STATE_NORMAL = 1;
+    WINDOW_STATE_MINIMIZED = 2;
+    WINDOW_STATE_MAXIMIZED = 3;
+    WINDOW_STATE_HIDDEN = 4;
+}
+
+message MoveWindowRequest {
+    uint64 handle = 1;
+    int32 x = 2;
+    int32 y = 3;
+    bool repaint = 4;
+}
+
+message ResizeWindowRequest {
+    uint64 handle = 1;
+    int32 width = 2;
+    int32 height = 3;
+    bool repaint = 4;
+}
+
+message MoveResizeWindowRequest {
+    uint64 handle = 1;
+    int32 x = 2;
+    int32 y = 3;
+    int32 width = 4;
+    int32 height = 5;
+    bool repaint = 6;
+}
+
+message GetWindowRectRequest {
+    uint64 handle = 1;
+}
+
+message GetClientRectRequest {
+    uint64 handle = 1;
+}
+
+message WindowRectResponse {
+    bool success = 1;
+    WindowRect rect = 2;
+    string error = 3;
+}
+
+message SetWindowPosRequest {
+    uint64 handle = 1;
+    int32 x = 2;
+    int32 y = 3;
+    int32 width = 4;
+    int32 height = 5;
+    SetWindowPosFlags flags = 6;
+}
+
+enum SetWindowPosFlags {
+    SET_WINDOW_POS_FLAGS_UNSPECIFIED = 0;
+    SET_WINDOW_POS_FLAG_NOSIZE = 1;
+    SET_WINDOW_POS_FLAG_NOMOVE = 2;
+    SET_WINDOW_POS_FLAG_NOZORDER = 4;
+    SET_WINDOW_POS_FLAG_NOREDRAW = 8;
+    SET_WINDOW_POS_FLAG_NOACTIVATE = 16;
+    SET_WINDOW_POS_FLAG_FRAMECHANGED = 32;
+    SET_WINDOW_POS_FLAG_SHOWWINDOW = 64;
+    SET_WINDOW_POS_FLAG_HIDEWINDOW = 128;
+    SET_WINDOW_POS_FLAG_NOCOPYBITS = 256;
+    SET_WINDOW_POS_FLAG_NOOWNERZORDER = 512;
+    SET_WINDOW_POS_FLAG_NOSENDCHANGING = 1024;
+    SET_WINDOW_POS_FLAG_DEFERERASE = 2048;
+    SET_WINDOW_POS_FLAG_ASYNCWINDOWPOS = 4096;
+}
+
+// Screenshot
+message CaptureWindowRequest {
+    uint64 handle = 1;
+    ImageFormat format = 2;
+    int32 quality = 3;
+    bool include_nonclient = 4;
+}
+
+message CaptureClientAreaRequest {
+    uint64 handle = 1;
+    ImageFormat format = 2;
+    int32 quality = 3;
+}
+
+message CaptureRegionRequest {
+    WindowRect region = 1;
+    ImageFormat format = 2;
+    int32 quality = 3;
+}
+
+// Window properties
+message GetWindowTitleRequest {
+    uint64 handle = 1;
+}
+
+message WindowTitleResponse {
+    bool success = 1;
+    string title = 2;
+    string error = 3;
+}
+
+message SetWindowTitleRequest {
+    uint64 handle = 1;
+    string title = 2;
+}
+
+message GetWindowClassRequest {
+    uint64 handle = 1;
+}
+
+message WindowClassResponse {
+    bool success = 1;
+    string class_name = 2;
+    string error = 3;
+}
+
+message GetWindowProcessIdRequest {
+    uint64 handle = 1;
+}
+
+message WindowProcessIdResponse {
+    bool success = 1;
+    uint32 process_id = 2;
+    uint32 thread_id = 3;
+    string error = 4;
+}
+
+message GetWindowStylesRequest {
+    uint64 handle = 1;
+}
+
+message GetWindowExStylesRequest {
+    uint64 handle = 1;
+}
+
+message WindowStylesResponse {
+    bool success = 1;
+    WindowStyles styles = 2;
+    WindowStyles ex_styles = 3;
+    string error = 4;
+}
+
+message SetWindowStylesRequest {
+    uint64 handle = 1;
+    WindowStyles styles = 2;
+}
+
+message SetWindowExStylesRequest {
+    uint64 handle = 1;
+    WindowStyles ex_styles = 2;
+}
+
+// Z-order
+message BringToTopRequest {
+    uint64 handle = 1;
+}
+
+message SendToBottomRequest {
+    uint64 handle = 1;
+}
+
+message SetWindowZOrderRequest {
+    uint64 handle = 1;
+    uint64 insert_after = 2; // HWND_TOP, HWND_BOTTOM, HWND_TOPMOST, HWND_NOTOPMOST, or handle
+    bool is_handle = 3;
+}
+
+// Input
+message SetFocusRequest {
+    uint64 handle = 1;
+}
+
+message PostMessageRequest {
+    uint64 handle = 1;
+    uint32 msg = 2;
+    uint64 wparam = 3;
+    int64 lparam = 4;
+}
+
+message SendMessageRequest {
+    uint64 handle = 1;
+    uint32 msg = 2;
+    uint64 wparam = 3;
+    int64 lparam = 4;
+}
+
+message MessageResponse {
+    bool success = 1;
+    int64 result = 2;
+    string error = 3;
+}
+
+// Multi-monitor
+message MonitorList {
+    repeated MonitorInfo monitors = 1;
+}
+
+message MonitorInfo {
+    string name = 1;
+    WindowRect rect = 2;
+    WindowRect work_area = 3;
+    bool is_primary = 4;
+    float scale_factor = 5;
+    uint32 dpi_x = 6;
+    uint32 dpi_y = 7;
+}
+
+message GetWindowMonitorRequest {
+    uint64 handle = 1;
+}
+
+message MonitorResponse {
+    bool success = 1;
+    MonitorInfo monitor = 2;
+    string error = 3;
+}
+
+// Image format (shared)
+enum ImageFormat {
+    IMAGE_FORMAT_UNSPECIFIED = 0;
+    IMAGE_FORMAT_BGR = 1;
+    IMAGE_FORMAT_RGB = 2;
+    IMAGE_FORMAT_RGBA = 3;
+    IMAGE_FORMAT_GRAY = 4;
+    IMAGE_FORMAT_JPEG = 5;
+    IMAGE_FORMAT_PNG = 6;
+}

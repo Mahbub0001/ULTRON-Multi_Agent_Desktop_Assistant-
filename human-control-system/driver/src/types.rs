@@ -25,11 +25,9 @@ pub enum VirtualKey {
     Pause = 0x13,
     Capital = 0x14,
     Kana = 0x15,
-    Hangul = 0x15,
     Junja = 0x17,
     Final = 0x18,
     Hanja = 0x19,
-    Kanji = 0x19,
     Escape = 0x1B,
     Convert = 0x1C,
     NonConvert = 0x1D,
@@ -370,4 +368,9 @@ bitflags::bitflags! {
         const TOUCH = 1 << 9;
         const FORCE_FEEDBACK = 1 << 10;
     }
+}
+#[allow(non_upper_case_globals)]
+impl VirtualKey {
+    pub const Hangul: Self = Self::Kana;
+    pub const Kanji: Self = Self::Hanja;
 }

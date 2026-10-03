@@ -36,6 +36,9 @@ pub enum DriverError {
     
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+
+    #[error("Serial port error: {0}")]
+    SerialError(#[from] serialport::Error),
     
     #[error("Windows API error: {0}")]
     #[cfg(target_os = "windows")]
