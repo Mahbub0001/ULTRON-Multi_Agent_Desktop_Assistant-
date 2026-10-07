@@ -17,7 +17,7 @@ from pathlib import Path
 
 try:
     import pyautogui
-    pyautogui.FAILSAFE = True
+    pyautogui.FAILSAFE = False
     pyautogui.PAUSE    = 0.05
     _PYAUTOGUI = True
 except ImportError:
@@ -38,6 +38,7 @@ def _base_dir() -> Path:
 _BASE         = _base_dir()
 _CONFIG_PATH  = _BASE / "config" / "api_keys.json"
 _MEMORY_PATH  = _BASE / "memory" / "long_term.json"
+_LAST_SCREEN_ELEMENTS: list[dict] = []
 
 def _load_config() -> dict:
     try:
@@ -178,9 +179,12 @@ def _smart_type(text: str, clear_first: bool = True) -> str:
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
-def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
+def _click(x=None, y=None, button: str = "left", clicks: int = 1, smooth: bool = True) -> str:
     _require_pyautogui()
     if x is not None and y is not None:
+        if smooth:
+            pyautogui.moveTo(x, y, duration=0.35)
+            time.sleep(0.12)
         pyautogui.click(x, y, button=button, clicks=clicks)
         return f"{'Double-c' if clicks == 2 else 'C'}licked ({x}, {y}) [{button}]"
     pyautogui.click(button=button, clicks=clicks)
@@ -204,13 +208,16 @@ def _scroll(direction: str = "down", amount: int = 3) -> str:
     vertical   = direction in ("up", "down")
     clicks     = amount if direction in ("up", "right") else -amount
     pyautogui.scroll(clicks) if vertical else pyautogui.hscroll(clicks)
-    return f"Scrolled {direction} ×{amount}"
+    return f"Scrolled {direction} x{amount}"
 
 
-def _move(x: int, y: int, duration: float = 0.3) -> str:
+def _move(x: int, y: int, duration: float = 0.35, description: str = "") -> str:
     _require_pyautogui()
     pyautogui.moveTo(x, y, duration=duration)
-    return f"Mouse → ({x}, {y})"
+    time.sleep(0.12)
+    if description:
+        return f"Mouse moved to '{description}' at ({x}, {y})"
+    return f"Mouse moved to ({x}, {y})"
 
 
 def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.6) -> str:
@@ -421,20 +428,29 @@ def _close_window(title: str = "") -> str:
     pyautogui.hotkey("alt", "f4")
     return f"Closed window{' (' + title + ')' if title else ''}."
 
-def _maximize_window() -> str:
+def _maximize_window(title: str = "") -> str:
     _require_pyautogui()
+    if title:
+        _focus_window(title)
+        time.sleep(0.2)
     pyautogui.hotkey("win", "up")
-    return "Maximized active window."
+    return f"Maximized window{' (' + title + ')' if title else ''}."
 
-def _minimize_window() -> str:
+def _minimize_window(title: str = "") -> str:
     _require_pyautogui()
+    if title:
+        _focus_window(title)
+        time.sleep(0.2)
     pyautogui.hotkey("win", "down")
-    return "Minimized active window."
+    return f"Minimized window{' (' + title + ')' if title else ''}."
 
-def _restore_window() -> str:
+def _restore_window(title: str = "") -> str:
     _require_pyautogui()
+    if title:
+        _focus_window(title)
+        time.sleep(0.2)
     pyautogui.hotkey("win", "up")
-    return "Restored active window."
+    return f"Restored active window{' (' + title + ')' if title else ''}."
 
 def _snap_left() -> str:
     _require_pyautogui()
@@ -529,10 +545,17 @@ def _zoom_reset() -> str:
     pyautogui.hotkey("ctrl", "0")
     return "Zoom reset."
 
-def _fullscreen() -> str:
+def _fullscreen(title: str = "") -> str:
     _require_pyautogui()
+    if title:
+        _focus_window(title)
+        time.sleep(0.2)
+    cur = _active_window().lower()
+    if "zoom" in title.lower() or "zoom" in cur:
+        pyautogui.hotkey("alt", "f")
+        return f"Toggled fullscreen in Zoom{' (' + title + ')' if title else ''}."
     pyautogui.press("f11")
-    return "Toggled fullscreen."
+    return f"Toggled fullscreen{' (' + title + ')' if title else ''}."
 
 def _task_manager() -> str:
     _require_pyautogui()
@@ -708,10 +731,68 @@ def _app_shortcut(app: str, action: str) -> str:
             "format_cells": ["ctrl", "1"],
             "auto_sum": ["alt", "="],
         },
+        # Zoom Meetings
+        "zoom": {
+            "new_meeting": ["alt", "v"],
+            "instant_meeting": ["alt", "v"],
+            "join": ["alt", "j"],
+            "schedule": ["alt", "s"],
+            "mute": ["alt", "a"],
+            "unmute": ["alt", "a"],
+            "mute_toggle": ["alt", "a"],
+            "video_toggle": ["alt", "v"],
+            "start_video": ["alt", "v"],
+            "stop_video": ["alt", "v"],
+            "share_screen": ["alt", "shift", "s"],
+            "chat": ["alt", "h"],
+            "participants": ["alt", "u"],
+            "end_meeting": ["alt", "q"],
+            "fullscreen": ["alt", "f"],
+            "full_screen": ["alt", "f"],
+        },
+        # Discord
+        "discord": {
+            "mute": ["ctrl", "shift", "m"],
+            "deafen": ["ctrl", "shift", "d"],
+            "search": ["ctrl", "k"],
+            "quick_switcher": ["ctrl", "k"],
+        },
+        # Spotify
+        "spotify": {
+            "play_pause": ["space"],
+            "next": ["ctrl", "right"],
+            "prev": ["ctrl", "left"],
+            "volume_up": ["ctrl", "up"],
+            "volume_down": ["ctrl", "down"],
+            "mute": ["ctrl", "shift", "down"],
+        },
     }
     
     if app not in shortcuts:
         return f"Unknown app: {app}. Available: {', '.join(shortcuts.keys())}"
+
+    # Always focus target application window before sending shortcut hotkeys
+    _focus_window(app)
+    time.sleep(0.2)
+
+    # Special handling for Zoom new_meeting: Zoom Home has no global hotkey to create a meeting,
+    # so we visually/UIA find and click the orange "New Meeting" button smoothly!
+    if app == "zoom" and action in ("new_meeting", "instant_meeting", "start_meeting", "create_meeting"):
+        coords = _screen_find("orange New Meeting button", window_title="Zoom")
+        if not coords:
+            coords = _screen_find("New Meeting", window_title="Zoom")
+        if not coords:
+            coords = _screen_find("Instant meeting", window_title="Zoom")
+        if coords:
+            _click(coords[0], coords[1], smooth=True)
+            return f"Zoom: clicked New Meeting button at {coords}"
+        # Fallback if already in meeting
+        pyautogui.hotkey("alt", "v")
+        return "Zoom: tried New Meeting button, fell back to Alt+V"
+
+    if app == "zoom" and action in ("fullscreen", "full_screen", "toggle_fullscreen"):
+        pyautogui.hotkey("alt", "f")
+        return "Zoom: toggled fullscreen (Alt+F)"
     
     if action not in shortcuts[app]:
         available = ", ".join(shortcuts[app].keys())
@@ -726,34 +807,197 @@ def _switch_app() -> str:
     pyautogui.hotkey("alt", "tab")
     return "Switched to previous application."
 
-def _screen_find(description: str) -> tuple[int, int] | None:
+def _screen_analyze(window_title: str = "") -> str:
+    """Analyze current screen or window using Gemini Vision, detect interactive UI elements,
+    cache them in _LAST_SCREEN_ELEMENTS with accurate pixel coordinates, and return a summary."""
+    global _LAST_SCREEN_ELEMENTS
+
+    if window_title:
+        _focus_window(window_title)
+        time.sleep(0.3)
+
     api_key = _get_api_key()
     if not api_key:
-        print("[ComputerControl] ⚠️ No API key for screen_find")
-        return None
+        return "Screen analysis requires GEMINI_API_KEY."
 
     try:
         from google import genai
         from google.genai import types as gtypes
+        from PIL import ImageGrab
 
         _require_pyautogui()
-        w, h  = pyautogui.size()
-        img   = pyautogui.screenshot()
-        buf   = io.BytesIO()
+        w, h = pyautogui.size()
+
+        img = None
+        try:
+            img = pyautogui.screenshot()
+        except Exception:
+            try:
+                img = ImageGrab.grab()
+            except Exception:
+                pass
+
+        if img is None:
+            return "Could not capture screenshot for screen analysis."
+
+        buf = io.BytesIO()
         img.save(buf, format="PNG")
         image_bytes = buf.getvalue()
 
         prompt = (
-            f"This is a screenshot of a {w}×{h} pixel screen. "
-            f"Locate the UI element described as: '{description}'. "
-            f"Reply with ONLY the center coordinates as: x,y "
-            f"If the element is not visible, reply: NOT_FOUND"
+            f"You are an expert GUI automation agent analyzing a {w}x{h} desktop screenshot. "
+            f"Detect all prominent clickable and interactable UI elements on screen (buttons, icons, tabs, search bars, dropdowns, links, checkboxes). "
+            f"Return ONLY a valid JSON list of objects. Each object MUST have:\n"
+            f"- 'label': concise label or description of the element (e.g. 'New Meeting button', 'Mute audio button', 'Home tab')\n"
+            f"- 'box_2d': [ymin, xmin, ymax, xmax] coordinates normalized from 0 to 1000\n"
+            f"Example format:\n"
+            f'[\n  {{"label": "New Meeting", "box_2d": [320, 240, 410, 310]}},\n  {{"label": "Join", "box_2d": [320, 330, 410, 400]}}\n]\n'
+            f"Do not include any markdown fences or explanation, only the JSON list."
         )
 
         from core import gemini
         response = gemini.call(
             [gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
-            tier=gemini.FAST, timeout_ms=20_000,
+            tier="gemini-2.5-flash", timeout_ms=25_000,
+        )
+        if response is None or not (response.text or "").strip():
+            return "Screen analysis returned no response."
+
+        raw_text = (response.text or "").strip()
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+            raw_text = re.sub(r"\s*```$", "", raw_text)
+        raw_text = raw_text.strip()
+
+        parsed = []
+        try:
+            parsed = json.loads(raw_text)
+        except Exception:
+            pattern = re.compile(r'\{\s*"label"\s*:\s*"([^"]+)"\s*,\s*"box_2d"\s*:\s*\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]\s*\}')
+            for m in pattern.finditer(raw_text):
+                parsed.append({
+                    "label": m.group(1),
+                    "box_2d": [int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))]
+                })
+
+        if not isinstance(parsed, list) or not parsed:
+            return "No UI elements detected on screen."
+
+        elements = []
+        summary_lines = []
+        for idx, item in enumerate(parsed[:25], 1):
+            lbl = item.get("label", f"element_{idx}")
+            box = item.get("box_2d", [])
+            if len(box) == 4:
+                ymin, xmin, ymax, xmax = [float(v) for v in box]
+                cx_norm = (xmin + xmax) / 2.0
+                cy_norm = (ymin + ymax) / 2.0
+                px = int((cx_norm / 1000.0) * w)
+                py = int((cy_norm / 1000.0) * h)
+                elements.append({
+                    "label": lbl,
+                    "x": px,
+                    "y": py,
+                    "box": box,
+                })
+                summary_lines.append(f"{idx}. '{lbl}' at ({px}, {py})")
+
+        _LAST_SCREEN_ELEMENTS = elements
+        active = _active_window().replace("Active Window: ", "").strip()
+        win_info = f" in '{active}'" if active and active != "Could not determine active window." else ""
+        return f"Detected {len(elements)} UI elements{win_info}:\n" + "\n".join(summary_lines)
+
+    except Exception as e:
+        print(f"[ComputerControl] [!] screen_analyze failed: {e}")
+        return f"Screen analysis failed: {e}"
+
+
+def _screen_find(description: str, window_title: str = "") -> tuple[int, int] | None:
+    desc_clean = description.lower().strip()
+
+    # 0. Check recent cache (_LAST_SCREEN_ELEMENTS) first
+    global _LAST_SCREEN_ELEMENTS
+    if _LAST_SCREEN_ELEMENTS:
+        for el in _LAST_SCREEN_ELEMENTS:
+            el_lbl = el.get("label", "").lower()
+            if desc_clean in el_lbl or el_lbl in desc_clean:
+                print(f"[ComputerControl] Found '{description}' in cached screen elements at ({el['x']}, {el['y']})")
+                return el["x"], el["y"]
+        desc_words = set(re.findall(r"\w+", desc_clean))
+        best_match = None
+        best_score = 0
+        for el in _LAST_SCREEN_ELEMENTS:
+            el_lbl = el.get("label", "").lower()
+            el_words = set(re.findall(r"\w+", el_lbl))
+            overlap = len(desc_words & el_words)
+            if overlap > best_score and overlap >= 2:
+                best_score = overlap
+                best_match = el
+        if best_match:
+            print(f"[ComputerControl] Found '{description}' in cache (overlap {best_score}) at ({best_match['x']}, {best_match['y']})")
+            return best_match["x"], best_match["y"]
+
+    # 1. Try Windows UI Automation first (instant, exact, zero latency, no API cost)
+    if platform.system() == "Windows":
+        try:
+            from core import uia
+            if uia.available():
+                target_app = window_title
+                if not target_app:
+                    active = _active_window().replace("Active Window: ", "").strip()
+                    if active and active != "Could not determine active window.":
+                        target_app = active
+                if target_app:
+                    ctrl = uia.find(target_app, description, timeout=0.2)
+                    if ctrl and ctrl.center != (0, 0):
+                        print(f"[ComputerControl] UI Automation located '{description}' at {ctrl.center}")
+                        return ctrl.center
+        except Exception:
+            pass
+
+    # 2. Vision fallback with Gemini 2.5 Flash
+    api_key = _get_api_key()
+    if not api_key:
+        print("[ComputerControl] [!] No API key for screen_find")
+        return None
+
+    try:
+        from google import genai
+        from google.genai import types as gtypes
+        from PIL import ImageGrab
+
+        _require_pyautogui()
+        w, h = pyautogui.size()
+
+        img = None
+        try:
+            img = pyautogui.screenshot()
+        except Exception:
+            try:
+                img = ImageGrab.grab()
+            except Exception:
+                pass
+
+        if img is None:
+            print("[ComputerControl] [!] Could not capture screenshot for vision element locator")
+            return None
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        image_bytes = buf.getvalue()
+
+        prompt = (
+            f"This is a screenshot of a {w}x{h} pixel screen. "
+            f"Locate the UI element described as: '{description}'. "
+            f"Return ONLY a JSON object with its bounding box normalized to 0-1000:\n"
+            f'{{"box_2d": [ymin, xmin, ymax, xmax]}}\n'
+            f"If the element is not visible or cannot be found, reply: NOT_FOUND"
+        )
+
+        from core import gemini
+        response = gemini.call(
+            [gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
+            tier="gemini-2.5-flash", timeout_ms=15_000,
         )
         if response is None:
             return None
@@ -762,12 +1006,42 @@ def _screen_find(description: str) -> tuple[int, int] | None:
         if "NOT_FOUND" in text.upper():
             return None
 
-        match = re.search(r"(\d+)\s*,\s*(\d+)", text)
-        if match:
-            return int(match.group(1)), int(match.group(2))
+        # Gemini box_2d coordinates are normalized to [0, 1000]
+        box_match = re.search(r'\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]', text)
+        if box_match:
+            ymin = int(box_match.group(1))
+            xmin = int(box_match.group(2))
+            ymax = int(box_match.group(3))
+            xmax = int(box_match.group(4))
+            cx_norm = (xmin + xmax) / 2.0
+            cy_norm = (ymin + ymax) / 2.0
+            pixel_x = int((cx_norm / 1000.0) * w)
+            pixel_y = int((cy_norm / 1000.0) * h)
+            print(f"[ComputerControl] Vision located '{description}' at ({pixel_x}, {pixel_y}) from box_2d {[ymin, xmin, ymax, xmax]}")
+            return pixel_x, pixel_y
+
+        point_match = re.search(r'\"point\"\s*:\s*\[\s*(\d+)\s*,\s*(\d+)\s*\]', text)
+        if point_match:
+            y_val = int(point_match.group(1))
+            x_val = int(point_match.group(2))
+            pixel_x = int((x_val / 1000.0) * w)
+            pixel_y = int((y_val / 1000.0) * h)
+            print(f"[ComputerControl] Vision located '{description}' at ({pixel_x}, {pixel_y}) from point {[y_val, x_val]}")
+            return pixel_x, pixel_y
+
+        raw_match = re.search(r"(\d+)\s*[,xX\s]\s*(\d+)", text)
+        if raw_match:
+            v1, v2 = int(raw_match.group(1)), int(raw_match.group(2))
+            if v1 <= 1000 and v2 <= 1000 and (w > 1000 or h > 1000):
+                mapped_x = int((v1 / 1000.0) * w)
+                mapped_y = int((v2 / 1000.0) * h)
+                print(f"[ComputerControl] Vision located '{description}' at ({mapped_x}, {mapped_y}) from normalized coords")
+                return mapped_x, mapped_y
+            if 0 <= v1 <= w and 0 <= v2 <= h:
+                return v1, v2
 
     except Exception as e:
-        print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
+        print(f"[ComputerControl] [!] screen_find failed: {e}")
 
     return None
 
@@ -828,30 +1102,91 @@ def computer_control(
     if player:
         player.write_log(f"[Computer] {action}")
 
-    print(f"[ComputerControl] ▶ {action}  {params}")
+    print(f"[ComputerControl] > {action}  {params}")
 
     try:
 
         if action == "type":
+            target = params.get("element") or params.get("target") or params.get("description")
+            if target:
+                win_title = params.get("title") or params.get("app")
+                if win_title:
+                    _focus_window(win_title)
+                    time.sleep(0.2)
+                coords = _screen_find(target, window_title=win_title or "")
+                if coords:
+                    _click(coords[0], coords[1])
+                    time.sleep(0.15)
             return _type(params.get("text", ""))
 
         if action == "smart_type":
+            target = params.get("element") or params.get("target") or params.get("description")
+            if target:
+                win_title = params.get("title") or params.get("app")
+                if win_title:
+                    _focus_window(win_title)
+                    time.sleep(0.2)
+                coords = _screen_find(target, window_title=win_title or "")
+                if coords:
+                    _click(coords[0], coords[1])
+                    time.sleep(0.15)
             return _smart_type(
                 params.get("text", ""),
                 clear_first=params.get("clear_first", True),
             )
 
-        if action in ("click", "left_click"):
-            return _click(params.get("x"), params.get("y"), "left", 1)
+        if action in ("click", "left_click", "double_click", "right_click"):
+            clicks = 2 if action == "double_click" else int(params.get("clicks", 1))
+            button = "right" if action == "right_click" else params.get("button", "left").lower().strip()
+            x = params.get("x")
+            y = params.get("y")
 
-        if action == "double_click":
-            return _click(params.get("x"), params.get("y"), "left", 2)
+            # 1. Exact coordinates supplied
+            if x is not None and y is not None:
+                return _click(int(x), int(y), button=button, clicks=clicks)
 
-        if action == "right_click":
-            return _click(params.get("x"), params.get("y"), "right", 1)
+            # 2. UI element description / name supplied -> visually/UIA locate!
+            desc = params.get("description") or params.get("element") or params.get("text") or params.get("target") or params.get("button_name")
+            if desc:
+                target_win = params.get("title") or params.get("app")
+                if target_win:
+                    _focus_window(target_win)
+                    time.sleep(0.2)
+                coords = _screen_find(desc, window_title=target_win or "")
+                if coords:
+                    time.sleep(0.15)
+                    _click(x=coords[0], y=coords[1], button=button, clicks=clicks)
+                    return f"{'Double-c' if clicks == 2 else 'C'}licked '{desc}' at {coords} [{button}]"
+                return f"Element not found on screen: '{desc}'"
 
-        if action == "move":
-            return _move(int(params.get("x", 0)), int(params.get("y", 0)))
+            # 3. Explicitly requested current position
+            if params.get("at_cursor") or params.get("current_position"):
+                return _click(None, None, button=button, clicks=clicks)
+
+            # 4. Reject blind clicks to prevent misclicks on inactive/random areas
+            return (
+                f"Cannot execute '{action}': Missing coordinates (x, y) or element description. "
+                "To click a button or UI element, specify description='<button name or appearance>' "
+                "(e.g. description='orange New Meeting button') or use action='screen_click', or provide x, y coordinates."
+            )
+
+        if action in ("move", "mouse_move"):
+            target_win = params.get("title") or params.get("app") or ""
+            if target_win:
+                _focus_window(target_win)
+                time.sleep(0.15)
+            desc = params.get("description") or params.get("element") or params.get("target") or ""
+            dur = float(params.get("duration", 0.35))
+            if desc:
+                coords = _screen_find(desc, window_title=target_win)
+                if coords:
+                    return _move(coords[0], coords[1], duration=dur, description=desc)
+                return f"Element not found on screen: '{desc}'"
+            x = params.get("x")
+            y = params.get("y")
+            if x is not None and y is not None:
+                return _move(int(x), int(y), duration=dur)
+            return "Missing coordinates (x, y) or description for mouse move."
 
         if action == "drag":
             return _drag(
@@ -883,13 +1218,23 @@ def computer_control(
             return _screenshot(params.get("path"))
 
         if action == "screen_find":
-            coords = _screen_find(params.get("description", ""))
+            desc = params.get("description") or params.get("element") or params.get("text") or ""
+            target_win = params.get("title") or params.get("app") or ""
+            coords = _screen_find(desc, window_title=target_win)
             return f"{coords[0]},{coords[1]}" if coords else "NOT_FOUND"
 
         if action == "screen_click":
-            desc = params.get("description", "")
+            desc = params.get("description") or params.get("element") or params.get("text") or params.get("target") or ""
+            if not desc:
+                return "Error: 'description' is required for screen_click."
             d_lower = desc.lower()
             cur_title = _active_window().lower()
+
+            target_win = params.get("title") or params.get("app")
+            if target_win:
+                _focus_window(target_win)
+                time.sleep(0.2)
+                cur_title = _active_window().lower()
 
             # Smart web-app direct navigation interception:
             # If user or model is trying to click navigation buttons/bell on LinkedIn or GitHub,
@@ -928,12 +1273,18 @@ def computer_control(
                     except Exception:
                         pass
 
-            coords = _screen_find(desc)
+            coords = _screen_find(desc, window_title=target_win or "")
             if coords:
                 time.sleep(0.2)
-                _click(x=coords[0], y=coords[1])
-                return f"Clicked '{desc}' at {coords}"
+                button = params.get("button", "left").lower().strip()
+                clicks = int(params.get("clicks", 1))
+                _click(x=coords[0], y=coords[1], button=button, clicks=clicks)
+                return f"{'Double-c' if clicks == 2 else 'C'}licked '{desc}' at {coords} [{button}]"
             return f"Element not found on screen: '{desc}'"
+
+        if action in ("screen_analyze", "analyze_screen"):
+            target_win = params.get("title") or params.get("app") or ""
+            return _screen_analyze(window_title=target_win)
 
         if action == "wait":
             secs = float(params.get("seconds", 1.0))
@@ -957,13 +1308,13 @@ def computer_control(
             return _close_window(params.get("title", ""))
 
         if action in ("maximize_window", "maximize"):
-            return _maximize_window()
+            return _maximize_window(params.get("title") or params.get("app") or "")
 
         if action in ("minimize_window", "minimize"):
-            return _minimize_window()
+            return _minimize_window(params.get("title") or params.get("app") or "")
 
         if action in ("restore_window", "restore"):
-            return _restore_window()
+            return _restore_window(params.get("title") or params.get("app") or "")
 
         if action in ("snap_left", "snap_left"):
             return _snap_left()
@@ -1020,7 +1371,7 @@ def computer_control(
             return _zoom_reset()
 
         if action in ("fullscreen",):
-            return _fullscreen()
+            return _fullscreen(params.get("title") or params.get("app") or "")
 
         if action in ("task_manager",):
             return _task_manager()
@@ -1079,7 +1430,7 @@ def computer_control(
         if action == "random_data":
             dt     = params.get("type", "name")
             result = _random_data(dt)
-            print(f"[ComputerControl] 🎲 random {dt} → {result}")
+            print(f"[ComputerControl] random {dt} -> {result}")
             return result
 
         if action == "user_data":
@@ -1088,26 +1439,26 @@ def computer_control(
             value   = profile.get(field, "")
             if not value:
                 value = _random_data(field)
-                print(f"[ComputerControl] ⚠️ No '{field}' in memory, using random: {value}")
+                print(f"[ComputerControl] [!] No '{field}' in memory, using random: {value}")
             return value
 
         return f"Unknown action: '{action}'"
 
     except Exception as e:
-        print(f"[ComputerControl] ❌ {action}: {e}")
+        print(f"[ComputerControl] [ERROR] {action}: {e}")
         return f"computer_control '{action}' failed: {e}"
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Complete computer & desktop app control: type, click, hotkeys, scroll, window management (snap, restore, move monitor), tab management, text editing (copy, cut, paste, select all, find, zoom), system shortcuts (task manager, settings, file explorer, clipboard history, virtual desktops, lock), and app-specific hotkeys (VS Code, Chrome, Firefox, YouTube, Word, Excel, Notepad).",
+    "description": "Complete computer & desktop app control: screen analysis (find all buttons on screen), type, click, mouse glide/hover, hotkeys, scroll, window management (focus, fullscreen, snap, restore, move monitor), tab management, text editing (copy, cut, paste, select all, find, zoom), system shortcuts (task manager, settings, file explorer, clipboard history, virtual desktops, lock), and app-specific hotkeys (VS Code, Chrome, Firefox, YouTube, Word, Excel, Notepad, Zoom, Discord, Spotify). For discovering buttons on screen, use action='screen_analyze'. For moving the mouse cursor to a specific button smoothly, use action='move' with description='...'. For clicking UI buttons by name or visual appearance, use action='screen_click' with description='...' or supply description='...' with click.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | drag | copy | cut | paste | screenshot | wait | clear_field | focus_window | list_windows | active_window | close_window | maximize_window | minimize_window | restore_window | snap_left | snap_right | move_window_monitor | close_tab | new_tab | reopen_tab | next_tab | prev_tab | select_all | find | print | save_as | zoom_in | zoom_out | zoom_reset | fullscreen | task_manager | run_dialog | settings | file_explorer | action_center | quick_settings | emoji_picker | clipboard_history | virtual_desktop_new | virtual_desktop_close | virtual_desktop_switch | lock_screen | app_shortcut | switch_app | save | select_all | undo | redo | screen_find | screen_click | random_data | user_data"
+                "description": "screen_analyze | screen_click | screen_find | move | click | double_click | right_click | type | smart_type | hotkey | press | scroll | drag | copy | cut | paste | screenshot | wait | clear_field | focus_window | list_windows | active_window | close_window | maximize_window | minimize_window | restore_window | fullscreen | snap_left | snap_right | move_window_monitor | close_tab | new_tab | reopen_tab | next_tab | prev_tab | select_all | find | print | save_as | zoom_in | zoom_out | zoom_reset | task_manager | run_dialog | settings | file_explorer | action_center | quick_settings | emoji_picker | clipboard_history | virtual_desktop_new | virtual_desktop_close | virtual_desktop_switch | lock_screen | app_shortcut | switch_app | save | undo | redo | random_data | user_data"
             },
             "text": {
                 "type": "STRING",
@@ -1163,7 +1514,7 @@ TOOL = {
             },
             "description": {
                 "type": "STRING",
-                "description": "Element description for screen_find/screen_click"
+                "description": "Natural-language UI element description or button label (e.g. 'orange New Meeting button', 'Home tab', 'Join') for screen_click or click/double_click"
             },
             "type": {
                 "type": "STRING",
@@ -1183,11 +1534,11 @@ TOOL = {
             },
             "app": {
                 "type": "STRING",
-                "description": "App name for app_shortcut: vscode | chrome | edge | firefox | youtube | notepad | word | excel"
+                "description": "App name for app_shortcut: vscode | chrome | edge | firefox | youtube | notepad | word | excel | zoom | discord | spotify"
             },
             "app_action": {
                 "type": "STRING",
-                "description": "App-specific action for app_shortcut (e.g. command_palette, devtools, play_pause, bold, etc.)"
+                "description": "App-specific action for app_shortcut (e.g. new_meeting, mute, devtools, play_pause, etc.)"
             }
         },
         "required": [

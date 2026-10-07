@@ -38,7 +38,7 @@ def _vision_fallback(app: str, element: str) -> str:
     its center. Only reached when UIA has no matching control.
     """
     try:
-        from actions.computer_control import _screen_find
+        from actions.computer_control import _screen_find, _click
     except Exception:
         return ""
     # Bring the target window forward first — vision sees the focused app.
@@ -47,11 +47,10 @@ def _vision_fallback(app: str, element: str) -> str:
         time.sleep(0.3)
     except Exception:
         pass
-    coords = _screen_find(f"the UI element '{element}'")
+    coords = _screen_find(f"the UI element '{element}'", window_title=app)
     if not coords:
         return ""
-    import pyautogui
-    pyautogui.click(coords[0], coords[1])
+    _click(coords[0], coords[1], smooth=True)
     return f"Clicked '{element}' at {coords} using visual element search."
 
 
