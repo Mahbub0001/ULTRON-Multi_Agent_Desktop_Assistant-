@@ -730,6 +730,14 @@ def _app_shortcut(app: str, action: str) -> str:
             "filter": ["ctrl", "shift", "l"],
             "format_cells": ["ctrl", "1"],
             "auto_sum": ["alt", "="],
+            "autofit_columns": ["alt", "h", "o", "i"],
+            "autofit_rows": ["alt", "h", "o", "a"],
+            "autofit": ["alt", "h", "o", "i"],
+            "format_table": ["ctrl", "t"],
+            "wrap_text": ["alt", "h", "w"],
+            "freeze_panes": ["alt", "w", "f", "f"],
+            "select_all": ["ctrl", "a"],
+            "save": ["ctrl", "s"],
         },
         # Zoom Meetings
         "zoom": {
@@ -793,7 +801,16 @@ def _app_shortcut(app: str, action: str) -> str:
     if app == "zoom" and action in ("fullscreen", "full_screen", "toggle_fullscreen"):
         pyautogui.hotkey("alt", "f")
         return "Zoom: toggled fullscreen (Alt+F)"
-    
+
+    if app == "excel" and action in ("autofit", "autofit_columns", "fit_columns", "format_table", "format_sheet", "clean_table"):
+        try:
+            from actions.excel_control import excel_control as ec
+            res = ec({"action": "format_table" if ("table" in action or "sheet" in action) else "autofit"})
+            if res and not res.startswith("Keyboard autofit failed"):
+                return res
+        except Exception:
+            pass
+
     if action not in shortcuts[app]:
         available = ", ".join(shortcuts[app].keys())
         return f"Unknown action '{action}' for {app}. Available: {available}"
