@@ -52,7 +52,7 @@ from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary, pop_last_session,
-    search_memory, set_trim_notifier,
+    search_memory, set_trim_notifier, remember,
 )
 
 # The file-backed tools (open_app, web_search, browser_control, …) are no longer
@@ -408,12 +408,13 @@ TOOL_DECLARATIONS = [
     {
         "name": "save_memory",
         "description": (
-            "Save an important personal fact about the user to long-term memory. "
+            "Save an important personal fact about the user or their family to long-term memory. "
             "Call this silently whenever the user reveals something worth remembering: "
-            "name, age, city, job, preferences, hobbies, relationships, projects, or future plans. "
+            "name, age, city, job, parents/family details, preferences, hobbies, relationships, projects, or future plans. "
+            "Especially when the user says 'মনে রাখো' / 'মনে রেখো' / 'remember this' / 'save this'. "
             "Do NOT call for: weather, reminders, searches, or one-time commands. "
             "Do NOT announce that you are saving — just call it silently. "
-            "Values must be in English regardless of the conversation language."
+            "Values can be in English or Bengali/original language as stated by the user."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -424,13 +425,13 @@ TOOL_DECLARATIONS = [
                         "identity — name, age, birthday, city, job, language, nationality | "
                         "preferences — favorite food/color/music/film/game/sport, hobbies | "
                         "projects — active projects, goals, things being built | "
-                        "relationships — friends, family, partner, colleagues | "
+                        "relationships — family (father/mother/sister/brother), friends, partner | "
                         "wishes — future plans, things to buy, travel dreams | "
                         "notes — habits, schedule, anything else worth remembering"
                     )
                 },
-                "key":   {"type": "STRING", "description": "Short snake_case key (e.g. name, favorite_food, sister_name)"},
-                "value": {"type": "STRING", "description": "Concise value in English (e.g. Fatih, pizza, older sister)"},
+                "key":   {"type": "STRING", "description": "Short snake_case key (e.g. name, mother_job, father_name, favorite_food)"},
+                "value": {"type": "STRING", "description": "Concise accurate value (in English or Bengali)"},
             },
             "required": ["category", "key", "value"]
         }
@@ -1117,7 +1118,7 @@ class JarvisLive:
             key      = args.get("key", "")
             value    = args.get("value", "")
             if key and value:
-                update_memory({category: {key: {"value": value}}})
+                remember(key, value, category)
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
             self.set_speaking(False)
             if not self.ui.muted:
@@ -1569,6 +1570,7 @@ class JarvisLive:
                                         "text": full_in,
                                         "ts": datetime.now().isoformat(),
                                     }))
+                                asyncio.create_task(self._auto_capture_memory(full_in))
                             in_buf = []
 
                             full_out = " ".join(out_buf).strip()
@@ -1846,6 +1848,16 @@ class JarvisLive:
                 save_session_summary(summary, lang)
         except Exception as e:
             print(f"[Memory] ⚠️ Session summary failed: {e}")
+
+    async def _auto_capture_memory(self, text: str) -> None:
+        """Background worker: listens to user speech and auto-persists personal facts."""
+        try:
+            from memory.memory_manager import auto_extract_and_save_memory
+            captured = await auto_extract_and_save_memory(text)
+            if captured:
+                print(f"[Memory] 🧠 Auto-remembered: {captured.get('category')}/{captured.get('key')} = {captured.get('value')}")
+        except Exception as e:
+            print(f"[Memory] ⚠️ Auto memory capture failed: {e}")
 
     # ── System monitor ──────────────────────────────────────────────────────────
 

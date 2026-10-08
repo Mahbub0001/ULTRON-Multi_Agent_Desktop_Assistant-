@@ -37,12 +37,29 @@ MAX_VALUE_LENGTH = 380
 #
 # Everything above the core stays on disk and is fetched on demand by the
 # recall_memory tool — see search_memory() and format_memory_for_prompt().
-MEMORY_MAX_CHARS  = 200_000
-PROMPT_CORE_CHARS = 900
-PROMPT_INDEX_CHARS = 420
-# Most entries any one category may contribute to the core block, so a person
-# with forty stored preferences still gets their sister into the prompt.
-PROMPT_MAX_PER_CATEGORY = 6
+MEMORY_MAX_CHARS  = 500_000
+PROMPT_CORE_CHARS = 16_000
+PROMPT_INDEX_CHARS = 2_000
+# Most entries any one category may contribute to the core block
+PROMPT_MAX_PER_CATEGORY = 40
+
+_CATEGORY_ALIASES: dict[str, str] = {
+    "family": "relationships",
+    "relatives": "relationships",
+    "friends": "relationships",
+    "parents": "relationships",
+    "personal": "identity",
+    "user": "identity",
+    "me": "identity",
+    "work": "projects",
+    "goals": "projects",
+    "habits": "preferences",
+    "likes": "preferences",
+    "favorite": "preferences",
+    "favourite": "preferences",
+    "wish": "wishes",
+    "plans": "wishes",
+}
 
 def _empty_memory() -> dict:
     return {
@@ -159,10 +176,15 @@ def _recursive_update(target: dict, updates: dict) -> bool:
 def update_memory(memory_update: dict) -> dict:
     if not isinstance(memory_update, dict) or not memory_update:
         return load_memory()
+    # Normalize aliases in top-level categories
+    normalized: dict = {}
+    for cat, val in memory_update.items():
+        canonical = _CATEGORY_ALIASES.get(str(cat).lower().strip(), str(cat))
+        normalized[canonical] = val
     memory = load_memory()
-    if _recursive_update(memory, memory_update):
+    if _recursive_update(memory, normalized):
         save_memory(memory)
-        print(f"[Memory] 💾 Saved: {list(memory_update.keys())}")
+        print(f"[Memory] 💾 Saved: {list(normalized.keys())}")
     return memory
 
 def _entry_value(entry) -> str:
@@ -177,42 +199,31 @@ def _pretty(key: str) -> str:
     return key.replace("_", " ").strip()
 
 
-# Identity is always in the prompt; these categories compete for the remaining
-# budget by recency.
+# Identity is always in the prompt; these categories are ordered by priority
+_CATEGORY_ORDER = ["relationships", "preferences", "projects", "notes", "wishes"]
 _CATEGORY_LABELS = {
-    "preferences":   "Preferences",
+    "relationships": "People in their life & Family",
+    "preferences":   "Preferences & Habits",
     "projects":      "Active projects / goals",
-    "relationships": "People in their life",
+    "notes":         "Notes & Important Facts",
     "wishes":        "Wishes / plans",
-    "notes":         "Notes",
 }
 
-_IDENTITY_FIELDS = ["name", "age", "birthday", "city", "job",
-                    "language", "school", "nationality"]
+_IDENTITY_FIELDS = [
+    "name", "full_name", "nickname", "age", "birthday", "city", "home_district", "job",
+    "language", "school", "university", "education_field", "nationality", "github_username", "github_profile"
+]
 
 
 def format_memory_for_prompt(memory: dict | None) -> str:
     """Build the memory block that goes into the system prompt.
 
-    This used to dump everything. It now sends three things:
-
-      1. IDENTITY  - always, in full. It is small, and it is wrong for the
-         assistant to have to look up your name.
-      2. RECENT    - the most recently updated entries from every other
-         category, up to PROMPT_CORE_CHARS. Recency is the cheapest useful
-         relevance signal available without embeddings.
-      3. AN INDEX  - the *keys* of everything else, values omitted.
-
-    Point 3 is what makes recall work at all. A model cannot decide to look
-    something up if it does not know the thing exists: with only points 1 and 2,
-    "who is Ayse?" would get "I don't know" while ayse_sister sat on disk
-    unread. The index costs a few hundred characters and turns recall from a
-    gamble into a lookup.
-
-    Net effect on latency: this block is SMALLER than the old full dump, so
-    every session connects with fewer tokens. Occasionally the model spends one
-    extra round trip on recall_memory - covered by the acknowledgment it
-    already speaks before any slow step."""
+    Sends:
+      1. IDENTITY  - always, in full.
+      2. ACTIVE MEMORY - facts from relationships, preferences, projects, notes, wishes.
+         Generous budget ensures critical personal and family facts are always visible.
+      3. AN INDEX  - the *keys* of any overflow beyond PROMPT_CORE_CHARS.
+    """
     if not memory:
         return ""
 
@@ -225,14 +236,11 @@ def format_memory_for_prompt(memory: dict | None) -> str:
         if not val:
             continue
         if field == "language":
-            # Labelled as an observation, not a setting. A bare "Language:
-            # English" line written months ago reads like a standing order and
-            # was one of the reasons a Turkish question came back in English.
             core_lines.append(
                 f"Has spoken to you in: {val} (an observation about the past — "
                 f"always answer in the language of their CURRENT message)")
         else:
-            core_lines.append(f"{field.title()}: {val}")
+            core_lines.append(f"{_pretty(field).title()}: {val}")
     for key, entry in identity.items():
         if key in _IDENTITY_FIELDS:
             continue
@@ -240,26 +248,23 @@ def format_memory_for_prompt(memory: dict | None) -> str:
         if val:
             core_lines.append(f"{_pretty(key).title()}: {val}")
 
-    # 2. Everything else, most recently updated first
+    # 2. Everything else, organized by category priority
     rest: list[tuple[str, str, str, str]] = []   # (updated, cat, key, value)
-    for cat in _CATEGORY_LABELS:
+    for cat in _CATEGORY_ORDER:
+        cat_items = []
         for key, entry in (memory.get(cat, {}) or {}).items():
             val = _entry_value(entry)
             if not val:
                 continue
             updated = (entry.get("updated", "") if isinstance(entry, dict) else "") or "0000-00-00"
-            rest.append((updated, cat, key, val))
-    rest.sort(key=lambda t: t[0], reverse=True)
+            cat_items.append((updated, cat, key, val))
+        cat_items.sort(key=lambda t: t[0], reverse=True)
+        rest.extend(cat_items)
 
     used    = sum(len(l) + 1 for l in core_lines)
     shown: dict[str, list[str]] = {}
     overflow: dict[str, list[str]] = {}
 
-    # Recency decides order, but no single category may take the whole budget.
-    # Without the cap, someone with forty stored preferences gets a prompt that
-    # is forty preferences and not one person's name — the categories that
-    # matter most in conversation are also the ones that change least often, so
-    # pure recency systematically buries them.
     per_cat_used: dict[str, int] = {}
     for _updated, cat, key, val in rest:
         line = f"  - {_pretty(key).title()}: {val}"
@@ -271,14 +276,10 @@ def format_memory_for_prompt(memory: dict | None) -> str:
         else:
             overflow.setdefault(cat, []).append(_pretty(key))
 
-    # The index is a table of contents, so it is interleaved across categories
-    # rather than continuing in recency order. Sorted by recency it would list
-    # twenty-four preferences before the first relationship, and the one entry
-    # the index exists for — the old fact the model has no other way to know
-    # about — would fall off the end.
+    # The index is a table of contents
     indexed: list[str] = []
     if overflow:
-        cats  = [c for c in _CATEGORY_LABELS if overflow.get(c)]
+        cats  = [c for c in _CATEGORY_ORDER if overflow.get(c)]
         cursor = {c: 0 for c in cats}
         while cats:
             for cat in list(cats):
@@ -289,7 +290,8 @@ def format_memory_for_prompt(memory: dict | None) -> str:
                 indexed.append(overflow[cat][i])
                 cursor[cat] = i + 1
 
-    for cat, label in _CATEGORY_LABELS.items():
+    for cat in _CATEGORY_ORDER:
+        label = _CATEGORY_LABELS.get(cat, cat.title())
         if shown.get(cat):
             core_lines.append("")
             core_lines.append(f"{label}:")
@@ -328,31 +330,36 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 _SYNONYM_GROUPS: dict[str, list[str]] = {
     "mother": [
         "ammu", "amma", "ammur", "ammar", "ma", "maa", "mar",
-        "mom", "mother", "mom's", "mother's", "matri", "mata",
-        "আম্মু", "আম্মুর", "আম্মা", "আম্মার", "মা", "মার", "মাতা", "মাতৃ",
+        "mom", "mother", "mom's", "mother's", "matri", "mata", "mamuni",
+        "আম্মু", "আম্মুর", "আম্মা", "আম্মার", "মা", "মার", "মাতা", "মাতৃ", "মামুনি",
         "अम्मी", "माँ", "माता", "अम्मीका"
     ],
     "father": [
         "baba", "abbu", "abba", "babar", "abbur", "abbar",
-        "dad", "father", "dad's", "father's", "pitri", "pita",
+        "dad", "father", "dad's", "father's", "pitri", "pita", "abuji",
         "বাবা", "বাবার", "আব্বু", "আব্বুর", "আব্বা", "আব্ব্বার", "পিতা", "পিতৃ",
         "अब्बा", "पिता", "पापा", "बापू", "पिताजी", "बाबा"
     ],
     "job": [
-        "job", "work", "profession", "occupation", "career", "employment", "works", "worker", "post", "role",
-        "pesha", "chakri", "kormokorta", "koren", "korchen", "chakuri", "chakrite", "peshay",
-        "পেশা", "চাকরি", "কর্মকর্তা", "কাজ", "কর্ম", "চাকুরে", "চাকরী",
-        "पेशा", "नौकरी", "काम", "कार्यकर्ता", "व्यवसाय"
+        "job", "work", "profession", "occupation", "career", "employment", "works", "worker", "post", "role", "service",
+        "pesha", "chakri", "kormokorta", "koren", "korchen", "chakuri", "chakrite", "peshay", "officer", "ngo",
+        "পেশা", "চাকরি", "কর্মকর্তা", "কাজ", "কর্ম", "চাকুরে", "চাকরী", "কর্মরত", "অফিসার", "এনজিও",
+        "पेशा", "नौकरी", "काम", "कार्यकर्ता", "व्यवसाय", "अधिकारी"
     ],
     "brother": [
-        "brother", "bro", "bhai", "vai", "bhaiya", "vaiya",
-        "ভাই", "ভাইয়া", "ভাইয়ের", "ভ্রাতা",
+        "brother", "bro", "bhai", "vai", "bhaiya", "vaiya", "bhaiye", "vaire", "bhaier", "vaier",
+        "ভাই", "ভাইয়া", "ভাইয়ের", "ভ্রাতা", "ভাইরে",
         "भाई", "भैया"
     ],
     "sister": [
-        "sister", "sis", "bon", "apu", "api", "boner", "apur",
+        "sister", "sis", "bon", "apu", "api", "boner", "apur", "apir",
         "বোন", "আপু", "আপি", "বোনের", "ভগিনী",
         "बहन", "दीदी"
+    ],
+    "family": [
+        "family", "relative", "relatives", "parents", "poribar", "poribare", "poribarer", "attiyo",
+        "পরিবার", "পরিবারের", "পিতামাতা", "আত্মীয়", "স্বজন",
+        "परिवार", "रिश्तेदार"
     ],
     "wife": [
         "wife", "spouse", "partner", "bou", "stree",
@@ -375,15 +382,38 @@ _SYNONYM_GROUPS: dict[str, list[str]] = {
         "बेटी", "पुत्री"
     ],
     "name": [
-        "name", "named", "names", "nam", "naam", "namti", "namta",
-        "নাম", "নামটি", "নামটা",
+        "name", "named", "names", "nam", "naam", "namti", "namta", "daknam",
+        "নাম", "নামটি", "নামটা", "ডাকনাম", "শুভনাম",
         "नाम"
     ],
     "city": [
-        "city", "town", "location", "place", "bari", "thake", "basha", "desh",
-        "বাড়ি", "বাসা", "শহর", "দেশ", "থাকেন", "থাকা",
-        "शहर", "घर", "रहते"
+        "city", "town", "location", "place", "bari", "thake", "basha", "desh", "district", "hometown", "jela",
+        "brahmanbaria", "dhaka", "bangladesh",
+        "বাড়ি", "বাসা", "শহর", "দেশ", "থাকেন", "থাকা", "জেলা", "গ্রাম", "ব্রাহ্মণবাড়িয়া", "ঢাকা",
+        "शहर", "घर", "रहते", "स्थान"
     ],
+    "education": [
+        "school", "college", "university", "varsity", "study", "student", "class", "degree", "education",
+        "porashona", "poralekha", "shikhon", "porasuna",
+        "স্কুল", "কলেজ", "বিশ্ববিদ্যালয়", "ভার্সিটি", "পড়াশোনা", "পড়ালেখা", "শ্রেণী", "ক্লাস", "শিক্ষা",
+        "स्कूल", "कॉलेज", "विश्वविद्यालय", "पढ़ाई"
+    ],
+    "preference": [
+        "favorite", "favourite", "preference", "likes", "fav", "love", "hobby",
+        "priyo", "pochondo", "bhalo lage", "bhalobashe",
+        "প্রিয়", "প্রিয়", "পছন্দ", "ভালোবাসা", "শখ",
+        "पसंद", "प्रिय"
+    ],
+    "food": [
+        "food", "dish", "meal", "khabar", "khana", "ranna", "biryani", "kacchi",
+        "খাবার", "খাওয়া", "রান্না", "বিরিয়ানি", "কাচ্চি",
+        "खाना", "भोजन"
+    ],
+    "project": [
+        "project", "code", "coding", "repo", "github", "ultron", "jarvis", "assistant", "mark",
+        "প্রজেক্ট", "কোড", "কাজ", "কাজের",
+        "प्रोजेक्ट", "काम"
+    ]
 }
 
 
@@ -402,34 +432,51 @@ def _expand_query_words(words: list[str]) -> list[str]:
 # ── Recall ────────────────────────────────────────────────────────────────────
 
 def _score(query_words: list[str], cat: str, key: str, value: str) -> int:
-    """Cheap lexical relevance. No embeddings, no network, no model call - this
-    runs in well under a millisecond, which is the entire point: recall must
-    cost one model round trip, never two."""
+    """Intelligent concept-based lexical relevance. No external models needed —
+    evaluates query words and synonym concepts against key, value, and category."""
     hay_key = _pretty(key).lower()
     hay_val = value.lower()
-    score   = 0
+    key_tokens = set(re.findall(r"[\w\u0980-\u09FF\u0900-\u097F]+", hay_key))
+    val_tokens = set(re.findall(r"[\w\u0980-\u09FF\u0900-\u097F]+", hay_val))
+
+    score = 0
     for w in query_words:
         if not w:
             continue
-        if w == hay_key:
+        concept_words = {w}
+        for canonical, syns in _SYNONYM_GROUPS.items():
+            if w == canonical or w in syns or any(s in w for s in syns if len(s) >= 3):
+                concept_words.add(canonical)
+                concept_words.update(syns)
+
+        # Match against key
+        if any(cw == hay_key for cw in concept_words):
+            score += 25
+        elif any(cw in key_tokens for cw in concept_words):
+            score += 15
+        elif any(cw in hay_key for cw in concept_words if len(cw) >= 3):
+            score += 8
+
+        # Match against value
+        if any(cw in val_tokens for cw in concept_words):
             score += 10
-        elif w in hay_key:
-            score += 6
-        if w in hay_val:
+        elif any(cw in hay_val for cw in concept_words if len(cw) >= 3):
+            score += 4
+
+        # Match against category
+        if any(cw in cat for cw in concept_words):
             score += 3
-        if w in cat:
-            score += 1
+
     return score
 
 
-def search_memory(query: str, limit: int = 8) -> str:
+def search_memory(query: str, limit: int = 10) -> str:
     """Find stored facts matching `query`. Backs the recall_memory tool.
 
     An empty query is treated as "show me everything you know", capped - the
     model asks that when the user says "what do you remember about me?"."""
     memory = load_memory()
     raw_words = [w for w in re.findall(r"[\w\u0980-\u09FF\u0900-\u097F]+", (query or "").lower()) if len(w) > 1]
-    words  = _expand_query_words(raw_words)
 
     rows: list[tuple[int, str, str, str]] = []
     for cat, items in memory.items():
@@ -439,7 +486,7 @@ def search_memory(query: str, limit: int = 8) -> str:
             val = _entry_value(entry)
             if not val:
                 continue
-            s = _score(words, cat, key, val) if words else 1
+            s = _score(raw_words, cat, key, val) if raw_words else 1
             if s > 0:
                 rows.append((s, cat, key, val))
 
@@ -478,6 +525,7 @@ def all_entries_for_ui() -> list[dict]:
     return rows
 
 def remember(key: str, value: str, category: str = "notes") -> str:
+    category = _CATEGORY_ALIASES.get(str(category).lower().strip(), str(category))
     valid = {"identity", "preferences", "projects", "relationships", "wishes", "notes"}
     if category not in valid:
         category = "notes"
@@ -486,6 +534,7 @@ def remember(key: str, value: str, category: str = "notes") -> str:
 
 
 def forget(key: str, category: str = "notes") -> str:
+    category = _CATEGORY_ALIASES.get(str(category).lower().strip(), str(category))
     memory = load_memory()
     cat    = memory.get(category, {})
     if key in cat:
@@ -497,6 +546,134 @@ def forget(key: str, category: str = "notes") -> str:
 
 
 forget_memory = forget
+
+
+# ── Auto Memory Ingestion ────────────────────────────────────────────────────
+
+_MEMORY_CUES = [
+    # Bengali explicit memory commands
+    "মনে রাখ", "মনে রেখ", "মনে রাখিস", "মনে রাখবেন", "সেভ কর", "নোট কর", "লিখে রাখ",
+    # Bengali personal possessives & relations
+    "আমার বাবা", "আমার আব্বু", "আমার আম্মু", "আমার মা", "আমার বোন", "আমার ভাই",
+    "আমার নাম", "আমার প্রিয়", "আমার প্রিয়", "আমার পছন্দ", "আমার বয়স", "আমার জন্মদিন",
+    "আমার পেশা", "আমার চাকরি", "আমার কাজ", "আমার স্কুল", "আমার কলেজ", "আমার ভার্সিটি",
+    "আমার বাসা", "আমার বাড়ি", "আমার জেলা", "আম্মুর পেশা", "আম্মুর চাকরি", "আম্মুর নাম",
+    "বাবার পেশা", "বাবার চাকরি", "বাবার নাম", "বোনের নাম", "ভাইয়ের নাম",
+    # Banglish cues
+    "mone rakh", "mone rekho", "save kor", "save koro", "note kor",
+    "amar baba", "amar abbu", "amar ammu", "amar ma", "amar bon", "amar vai",
+    "amar nam", "amar priyo", "amar pochondo", "amar basha", "amar bari",
+    "amar chakri", "amar pesha", "ammur pesha", "ammur chakri", "babar pesha",
+    # English cues
+    "remember", "keep in mind", "save this", "take note", "don't forget",
+    "my father", "my dad", "my mother", "my mom", "my sister", "my brother",
+    "my name is", "my favorite", "my favourite", "my job is", "i work as", "i live in",
+]
+
+
+def extract_and_save_heuristic(text: str) -> tuple[str, str, str] | None:
+    """Fast regex-based extractor for high-confidence common Bengali/English memory patterns."""
+    t = text.strip()
+
+    # Mother's job
+    m = re.search(r"(?:আম্মুর|মায়ের|ammu[r]?|ma[r]?)\s+(?:পেশা|কাজ|চাকরি|job|pesha)\s*(?:হলো|হচ্ছে|হল|is|[:=])?\s*(.+)", t, re.I)
+    if m:
+        val = m.group(1).strip().rstrip(".।")
+        remember("mother_job", val, "relationships")
+        return ("relationships", "mother_job", val)
+
+    # Father's job
+    m = re.search(r"(?:বাবার|পিতার|আব্বুর|baba[r]?|abbu[r]?)\s+(?:পেশা|কাজ|চাকরি|job|pesha)\s*(?:হলো|হচ্ছে|হল|is|[:=])?\s*(.+)", t, re.I)
+    if m:
+        val = m.group(1).strip().rstrip(".।")
+        remember("father_job", val, "relationships")
+        return ("relationships", "father_job", val)
+
+    # Mother's name
+    m = re.search(r"(?:আম্মুর|মায়ের|ammu[r]?|ma[r]?)\s+নাম\s*(?:হলো|হচ্ছে|হল|is|[:=])?\s*(.+)", t, re.I)
+    if m:
+        val = m.group(1).strip().rstrip(".।")
+        remember("mother_name", val, "relationships")
+        return ("relationships", "mother_name", val)
+
+    # Father's name
+    m = re.search(r"(?:বাবার|পিতার|আব্বুর|baba[r]?|abbu[r]?)\s+নাম\s*(?:হলো|হচ্ছে|হল|is|[:=])?\s*(.+)", t, re.I)
+    if m:
+        val = m.group(1).strip().rstrip(".।")
+        remember("father_name", val, "relationships")
+        return ("relationships", "father_name", val)
+
+    # Favorite food
+    m = re.search(r"(?:আমার\s+)?(?:প্রিয়|প্রিয়|priyo)\s+(?:খাবার|food)\s*(?:হলো|হচ্ছে|হল|is|[:=])?\s*(.+)", t, re.I)
+    if m:
+        val = m.group(1).strip().rstrip(".।")
+        remember("favorite_food", val, "preferences")
+        return ("preferences", "favorite_food", val)
+
+    # Favorite color
+    m = re.search(r"(?:আমার\s+)?(?:প্রিয়|প্রিয়|priyo)\s+(?:রং|colour|color)\s*(?:হলো|হচ্ছে|হল|is|[:=])?\s*(.+)", t, re.I)
+    if m:
+        val = m.group(1).strip().rstrip(".।")
+        remember("favorite_color", val, "preferences")
+        return ("preferences", "favorite_color", val)
+
+    return None
+
+
+async def auto_extract_and_save_memory(text: str) -> dict | None:
+    """Background auto-extractor: extracts personal facts and stores them permanently."""
+    if not text or len(text.strip()) < 5:
+        return None
+
+    low = text.lower()
+    if not any(cue in low for cue in _MEMORY_CUES):
+        return None
+
+    # 1. Try fast heuristic first (<1ms)
+    try:
+        h = extract_and_save_heuristic(text)
+        if h:
+            cat, key, val = h
+            print(f"[AutoMemory] ⚡ Fast-captured: {cat}/{key} = {val}")
+            return {"category": cat, "key": key, "value": val}
+    except Exception as e:
+        print(f"[AutoMemory] Heuristic notice: {e}")
+
+    # 2. Asynchronous LLM Extraction via Gemini
+    try:
+        import asyncio
+        from core import gemini
+        prompt = (
+            "You are an expert memory extractor for an AI personal assistant. "
+            "Analyze what the user said to the assistant:\n"
+            f'"{text}"\n\n'
+            "Did the user state a personal fact about themselves, their family, their preferences, their projects, or instruct the assistant to remember something? "
+            "If YES, return ONLY a JSON object:\n"
+            '{\n'
+            '  "category": "identity"|"relationships"|"preferences"|"projects"|"notes"|"wishes",\n'
+            '  "key": "snake_case_key (e.g. mother_profession, favorite_food, sister_name, birth_year)",\n'
+            '  "value": "concise accurate value in the user\'s language or English"\n'
+            '}\n'
+            "If NO personal fact or instruction to remember was given (e.g. general commands, questions, chit-chat), return null.\n"
+            "Output JSON only, no markdown, no explanation."
+        )
+        res = await asyncio.to_thread(gemini.as_json, prompt, gemini.FAST, None, 10000)
+        if isinstance(res, dict) and "key" in res and "value" in res:
+            cat = str(res.get("category", "notes")).lower().strip()
+            cat = _CATEGORY_ALIASES.get(cat, cat)
+            valid = {"identity", "preferences", "projects", "relationships", "wishes", "notes"}
+            if cat not in valid:
+                cat = "notes"
+            key = str(res["key"]).strip().lower().replace(" ", "_").replace("-", "_")
+            val = str(res["value"]).strip()
+            if key and val:
+                remember(key, val, cat)
+                print(f"[AutoMemory] 🧠 LLM-captured: {cat}/{key} = {val}")
+                return {"category": cat, "key": key, "value": val}
+    except Exception as e:
+        print(f"[AutoMemory] LLM extract error: {e}")
+
+    return None
 
 
 # ── Session memory ─────────────────────────────────────────────────────────────
