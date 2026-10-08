@@ -70,22 +70,44 @@ def _launch(app: str) -> str:
 def app_control(parameters: dict, response=None, player=None,
                 session_memory=None) -> str:
     """
-    Dispatch for app_control. Required: action, app.
-    Optional: element, text, key, timeout.
+    Dispatch for app_control. Required: action.
+    Optional: app, intent, element, text, key, timeout.
     """
     action = str(parameters.get("action", "")).strip().lower()
     app = str(parameters.get("app", "")).strip()
+    intent = str(parameters.get("intent", "") or "").strip()
     element = str(parameters.get("element", "") or "").strip()
     text = str(parameters.get("text", "") or "")
     key = str(parameters.get("key", "") or "").strip()
 
     if not action:
         return "Error: 'action' is required."
-    if not app and action != "windows":
-        return "Error: 'app' is required (a window title hint, e.g. 'PowerPoint')."
+
+    # Auto-detect active foreground window if app is omitted
+    if not app and action not in ("windows",):
+        try:
+            from core import universal_operator
+            ctx = universal_operator.get_active_window()
+            if ctx.title and ctx.title not in ("No active window", "Could not determine active window."):
+                app = ctx.title
+        except Exception:
+            pass
 
     try:
+        # High-Speed Universal Autonomous Operation (OODA Loop with Closed-Loop Verification)
+        if action in ("operate", "interact", "smart_action"):
+            from core import universal_operator
+            return universal_operator.execute_smart_operation(
+                intent=intent or element,
+                app=app,
+                element=element,
+                text=text,
+                action_type=str(parameters.get("action_type", "click")).lower()
+            )
+
         if action == "launch":
+            if not app:
+                return "Error: 'app' is required for launch (e.g. 'Zoom', 'Chrome', 'Notepad')."
             return _launch(app)
 
         if action == "windows":
@@ -96,8 +118,8 @@ def app_control(parameters: dict, response=None, player=None,
 
         if not uia.available():
             # No UIA at all — degrade to vision for click, honest error else.
-            if action == "click":
-                out = _vision_fallback(app, element or "the button to click")
+            if action in ("click", "double_click"):
+                out = _vision_fallback(app, element or intent or "the button to click")
                 return out or "UI automation unavailable and visual search failed."
             return ("UI automation unavailable on this system — "
                     "use computer_control screen_find/screen_click instead.")
@@ -122,15 +144,27 @@ def app_control(parameters: dict, response=None, player=None,
             return f"Active app: {info.title}. Top elements: {names}"
 
         if action in ("click", "double_click"):
-            if not element:
-                return "Error: 'element' is required for click."
+            target_el = element or intent
+            if not target_el:
+                return "Error: 'element' or 'intent' is required for click."
             try:
                 if action == "click":
-                    return uia.click(app, element, timeout=timeout)
-                return uia.double_click(app, element, timeout=timeout)
+                    return uia.click(app, target_el, timeout=timeout)
+                return uia.double_click(app, target_el, timeout=timeout)
             except RuntimeError as e:
-                # Not found by UIA → try with eyes before giving up.
-                out = _vision_fallback(app, element)
+                # First try universal domain operator fallback
+                try:
+                    from core import universal_operator
+                    res = universal_operator.execute_smart_operation(
+                        intent=target_el, app=app, element=target_el, action_type=action
+                    )
+                    if res and not res.startswith("Error"):
+                        return res
+                except Exception:
+                    pass
+
+                # If still not found, try visual grounding with Gemini Vision
+                out = _vision_fallback(app, target_el)
                 if out:
                     return out
                 return str(e)
@@ -185,7 +219,7 @@ def app_control(parameters: dict, response=None, player=None,
             return uia.wait_for(app, element,
                                 timeout=float(parameters.get("timeout", 8) or 8))
 
-        return (f"Unknown action '{action}'. Valid: launch, windows, elements, "
+        return (f"Unknown action '{action}'. Valid: operate, launch, windows, elements, "
                 "state, click, double_click, type, press, wait.")
 
     except RuntimeError as e:
@@ -197,31 +231,34 @@ def app_control(parameters: dict, response=None, player=None,
 TOOL = {
     "name": "app_control",
     "description": (
-        "Control any native Windows app at the element level. Actions: launch "
-        "(open the app and confirm its window), windows (list open windows), "
-        "elements (list the app's visible controls), state (active app + top "
-        "elements), click / double_click (press a named element, with visual "
-        "AI fallback), type (write text into a named field or focused control), "
-        "press (send a key), wait (block until an element appears). Use in a "
-        "look-then-act loop: launch -> elements -> click/type per step. For "
-        "PowerPoint/Word documents prefer the presentation action; for games "
-        "prefer game_control; for websites prefer browser_control."),
+        "Universal intelligent desktop & native Windows app operator with closed-loop verification. "
+        "Actions: operate (smart autonomous interaction by intent/goal with closed-loop verification, "
+        "e.g. intent='create meeting' in Zoom, 'autofit' in Excel, 'new tab' in Chrome), "
+        "launch (open app and verify window), windows (list open windows), "
+        "elements (list visible controls in app), state (active app + top elements), "
+        "click / double_click (press named element with multi-tier fallback), "
+        "type (write text into field), press (send key), wait (block until element appears). "
+        "If 'app' is omitted, it automatically detects and operates the active foreground window!"),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "enum": ["launch", "windows", "elements", "state", "click",
+                "enum": ["operate", "launch", "windows", "elements", "state", "click",
                          "double_click", "type", "press", "wait"],
                 "description": "What to do.",
             },
             "app": {
                 "type": "STRING",
-                "description": "Window title hint, e.g. 'PowerPoint', 'Roblox', 'Notepad'.",
+                "description": "Window title hint, e.g. 'Zoom', 'Excel', 'Chrome', 'Notepad'. Optional: auto-detects active window if omitted.",
+            },
+            "intent": {
+                "type": "STRING",
+                "description": "Goal or intent to execute (e.g. 'create meeting', 'mute', 'save file', 'new tab').",
             },
             "element": {
                 "type": "STRING",
-                "description": "Element name as shown by elements/state, e.g. 'New Slide', 'File'.",
+                "description": "Element name as shown by elements/state, e.g. 'New Slide', 'File', 'New Meeting'.",
             },
             "text": {"type": "STRING", "description": "Text to type (type action)."},
             "key": {"type": "STRING", "description": "Key name, e.g. 'enter', 'esc' (press action)."},

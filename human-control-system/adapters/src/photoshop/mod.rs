@@ -491,3 +491,4 @@ mod tests {
         assert_eq!(op_resp.layer.unwrap().opacity, 0.5);
     }
 }
+pub use api::{PhotoshopApi, PhotoshopApiBuilder};

@@ -2,7 +2,7 @@
 ; Inno Setup 6 Script
 
 #define MyAppName "ULTRON"
-#define MyAppVersion "1.56.0"
+#define MyAppVersion "1.57.0"
 #define MyAppPublisher "Nibir"
 #define MyAppExeName "ULTRON.exe"
 

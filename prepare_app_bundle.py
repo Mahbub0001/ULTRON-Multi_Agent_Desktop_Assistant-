@@ -25,6 +25,9 @@ def setup_bundle():
             print(f"  [+] Copied core/{f}")
         else:
             print(f"  [!] Warning: core/{f} missing")
+    for py_file in (ROOT / "core").glob("*.py"):
+        shutil.copy2(py_file, core_dest / py_file.name)
+    print("  [+] Copied core/*.py modules")
 
     # 2. Config directory (clean & sanitized)
     config_dest = DIST_APP / "config"

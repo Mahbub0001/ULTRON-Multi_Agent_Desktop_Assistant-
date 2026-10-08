@@ -92,11 +92,15 @@ def score(candidate: str, wanted: str) -> float:
         return 0.7 + 0.1 * (len(c) / len(w))
     ct, wt = _tokens(candidate), _tokens(wanted)
     if ct and wt:
-        overlap = len(ct & wt) / len(wt)
-        if overlap == 1.0:           # all wanted tokens present, any order
-            return 0.65
-        if overlap > 0:
-            return 0.4 * overlap
+        if ct.issubset(wt):          # e.g. "New Meeting" in "orange new meeting button"
+            return 0.75
+        if wt.issubset(ct):          # all wanted tokens inside candidate
+            return 0.70
+        overlap_c = len(ct & wt) / len(ct)
+        overlap_w = len(ct & wt) / len(wt)
+        best_overlap = max(overlap_c, overlap_w)
+        if best_overlap > 0:
+            return 0.45 * best_overlap
     return 0.0
 
 
@@ -155,15 +159,27 @@ def list_windows() -> list[dict]:
     return out
 
 
-def connect(app: str, timeout: float = 0.0):
+def connect(app: str = "", timeout: float = 0.0):
     """
-    Connect to the window whose title best matches `app`. Returns a pywinauto
+    Connect to the window whose title best matches `app`. If `app` is empty or
+    'active', defaults to the current foreground window. Returns a pywinauto
     WindowSpecification, or raises RuntimeError with a helpful message.
     """
     err = _require()
     if err:
         raise RuntimeError(err)
     from pywinauto import Desktop
+
+    if not app or app.lower() in ("active", "current"):
+        try:
+            import win32gui
+            hwnd = win32gui.GetForegroundWindow()
+            if hwnd:
+                t = win32gui.GetWindowText(hwnd).strip()
+                if t:
+                    app = t
+        except Exception:
+            pass
 
     deadline = time.time() + max(0.0, timeout)
     last_titles: list[str] = []
@@ -178,7 +194,7 @@ def connect(app: str, timeout: float = 0.0):
         titles = [(w.window_text() or "").strip() for w in windows]
         titles = [t for t in titles if t]
         last_titles = titles
-        chosen = best_match(titles, app)
+        chosen = best_match(titles, app) if app else (titles[0] if titles else None)
         if chosen:
             for w in windows:
                 if (w.window_text() or "").strip() == chosen:
@@ -313,8 +329,20 @@ def click(app: str, element: str, timeout: float = 0.0) -> str:
         import pyautogui
         pyautogui.click(cx, cy)
         return f"Clicked '{target.name}' at ({cx},{cy}) by coordinates."
-    el.click_input()
-    return f"Clicked '{target.name}' ({target.control_type or 'control'})."
+    try:
+        if hasattr(el, "invoke"):
+            el.invoke()
+            return f"Invoked '{target.name}' ({target.control_type or 'control'})."
+    except Exception:
+        pass
+    try:
+        el.click_input()
+        return f"Clicked '{target.name}' ({target.control_type or 'control'})."
+    except Exception:
+        cx, cy = target.center
+        import pyautogui
+        pyautogui.click(cx, cy)
+        return f"Clicked '{target.name}' at ({cx},{cy}) by coordinates."
 
 
 def double_click(app: str, element: str, timeout: float = 0.0) -> str:
@@ -326,8 +354,14 @@ def double_click(app: str, element: str, timeout: float = 0.0) -> str:
         import pyautogui
         pyautogui.doubleClick(cx, cy)
         return f"Double-clicked '{target.name}' at ({cx},{cy})."
-    el.double_click_input()
-    return f"Double-clicked '{target.name}'."
+    try:
+        el.double_click_input()
+        return f"Double-clicked '{target.name}'."
+    except Exception:
+        cx, cy = target.center
+        import pyautogui
+        pyautogui.doubleClick(cx, cy)
+        return f"Double-clicked '{target.name}' at ({cx},{cy})."
 
 
 def type_text(app: str, element: str, text: str, clear: bool = False,

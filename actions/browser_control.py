@@ -71,6 +71,29 @@ def _normalize_url(url: str) -> str:
         if "history" in u_lower:
             return "https://www.youtube.com/feed/history"
 
+    if "docs" in u_lower or "google docs" in u_lower:
+        return "https://docs.google.com/document/u/0/"
+    if "sheets" in u_lower or "google sheets" in u_lower:
+        return "https://docs.google.com/spreadsheets/u/0/"
+    if "drive" in u_lower or "google drive" in u_lower:
+        return "https://drive.google.com"
+    if "gmail" in u_lower:
+        return "https://mail.google.com"
+    if "chatgpt" in u_lower:
+        return "https://chatgpt.com"
+    if "claude" in u_lower:
+        return "https://claude.ai"
+    if "whatsapp" in u_lower:
+        return "https://web.whatsapp.com"
+    if "notion" in u_lower:
+        return "https://www.notion.so"
+    if "canva" in u_lower:
+        return "https://www.canva.com"
+    if "reddit" in u_lower:
+        return "https://www.reddit.com"
+    if "twitter" in u_lower or " x.com" in u_lower or u_lower == "x":
+        return "https://x.com"
+
     if "://" in url:
         return url
     # No dot at all → assume .com  (e.g. "instagram" → "instagram.com")

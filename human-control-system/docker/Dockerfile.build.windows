@@ -1,0 +1,55 @@
+# Simplified build - just Rust binaries
+FROM rust:1.82-bookworm AS rust-builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
+    lld \
+    llvm \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY Cargo.toml Cargo.lock ./
+COPY driver/Cargo.toml driver/
+COPY agent/Cargo.toml agent/
+COPY brain/Cargo.toml brain/
+COPY orchestrator/Cargo.toml orchestrator/
+COPY adapters/Cargo.toml adapters/
+
+# Pre-fetch dependencies
+RUN cargo fetch --locked
+
+# Copy source and build
+COPY . .
+RUN cargo build --release --locked --workspace --exclude vision --exclude hardware
+
+# ============================================
+# Final Runtime Image
+# ============================================
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    libgcc-s1 \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Rust binaries
+COPY --from=rust-builder /workspace/target/release/hcs-agent /usr/local/bin/
+COPY --from=rust-builder /workspace/target/release/hcs-orchestrator /usr/local/bin/
+COPY --from=rust-builder /workspace/target/release/hcs-brain /usr/local/bin/
+COPY --from=rust-builder /workspace/target/release/hcs-adapters /usr/local/bin/
+
+# Config directory
+RUN mkdir -p /etc/hcs /var/lib/hcs /var/log/hcs
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["agent"]

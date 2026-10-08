@@ -1,0 +1,39 @@
+# Orchestrator Configuration
+
+[server]
+grpc_addr = "0.0.0.0:50051"
+http_addr = "0.0.0.0:8080"
+
+[client]
+agent_addr = "http://localhost:50051"
+vision_addr = "http://localhost:50051"
+brain_addr = "http://localhost:50052"
+adapters_addr = "http://localhost:50053"
+timeout_seconds = 30
+
+[cli]
+history_file = "~/.hcs_history"
+max_history = 1000
+auto_complete = true
+
+[tui]
+refresh_rate_hz = 30
+theme = "dark"
+show_metrics = true
+
+[dsl]
+tasks_dir = "/opt/hcs/tasks"
+import_paths = ["/opt/hcs/tasks/lib"]
+builtin_macros_enabled = true
+
+[recorder]
+output_dir = "/var/lib/hcs/recordings"
+default_fps = 60
+compress = true
+
+[logging]
+level = "INFO"
+format = "text"
+file = "/var/log/hcs/orchestrator.log"
+max_size_mb = 100
+max_files = 10

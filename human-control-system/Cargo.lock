@@ -1963,6 +1963,7 @@ dependencies = [
  "crossbeam",
  "dashmap 5.5.3",
  "futures",
+ "futures-util",
  "goblin",
  "image",
  "memmap2",

@@ -1,0 +1,40 @@
+# Brain Service Configuration
+
+[server]
+host = "0.0.0.0"
+port = 50052
+max_concurrent_trees = 10
+tick_interval_ms = 16
+
+[behavior_tree]
+max_depth = 100
+max_nodes = 1000
+max_ticks_per_execution = 10000
+default_timeout_ms = 30000
+
+[wasm]
+# WASM Plugin settings
+plugin_dir = "/opt/hcs/wasm-plugins"
+memory_limit_mb = 64
+fuel_limit = 1000000
+epoch_deadline_ms = 100
+allowed_host_functions = [
+    "blackboard_get",
+    "blackboard_set", 
+    "blackboard_has",
+    "log_info",
+    "log_warn",
+    "log_error",
+    "get_time_ms",
+    "random_float",
+    "random_int"
+]
+
+[logging]
+level = "INFO"
+format = "json"
+
+[metrics]
+enabled = true
+port = 9092
+path = "/metrics"

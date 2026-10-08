@@ -55,6 +55,10 @@ windows = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 libc = "0.2"
 
+[lib]
+name = "hcs_driver"
+path = "src/lib.rs"
+
 [build-dependencies]
 cc = "1.0"
 bindgen = "0.69"

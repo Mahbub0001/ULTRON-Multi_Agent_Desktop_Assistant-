@@ -1,7 +1,6 @@
 //! Adapter Service Main Entry Point
 
 
-use hcs_adapters::proto::adapters_proto::adapters_service_server::AdaptersServiceServer;
 use hcs_adapters::service::AdapterServiceImpl;
 use hcs_adapters::config::AdaptersConfig;
 use tonic::transport::Server;
@@ -27,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Create service
     let service = AdapterServiceImpl::new(config.clone()).await?;
-    let service_state = service.state.clone();
+    let service_state = service.state();
 
     // Start metrics server if enabled
     if config.metrics.enabled {
@@ -44,8 +43,12 @@ async fn main() -> anyhow::Result<()> {
     let grpc_addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
     info!(address = %grpc_addr, "Starting gRPC server");
 
+    let (ps_srv, ch_srv, gm_srv, wn_srv) = service.into_servers();
     let grpc_server = Server::builder()
-        .add_service(service.into_server())
+        .add_service(ps_srv)
+        .add_service(ch_srv)
+        .add_service(gm_srv)
+        .add_service(wn_srv)
         .serve(grpc_addr);
 
     // Handle shutdown signals

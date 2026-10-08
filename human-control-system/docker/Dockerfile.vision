@@ -1,5 +1,5 @@
-# Vision-specific Dockerfile with GPU support
-FROM nvidia/cuda:12.4-devel-ubuntu22.04 AS vision-base
+# Vision-specific Dockerfile - CPU only for Windows compatibility
+FROM python:3.11-slim-bookworm AS vision-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -34,12 +34,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ONNX Runtime with TensorRT support
+# Install ONNX Runtime CPU from PyPI
 ARG ONNX_VERSION=1.18.0
 RUN pip3 install --no-cache-dir \
-    onnxruntime-gpu==${ONNX_VERSION} \
-    tensorrt==10.1.0 \
-    --extra-index-url https://pypi.ngc.nvidia.com
+    onnxruntime==${ONNX_VERSION}
 
 WORKDIR /opt/hcs/vision
 COPY vision/requirements.txt .

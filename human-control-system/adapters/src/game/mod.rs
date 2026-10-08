@@ -2,9 +2,7 @@
 //!
 //! Provides high-level interfaces for game memory manipulation.
 
-pub mod memory;
-pub mod scanner;
-pub mod injector;
+// Real process-memory access, scanning and injection modules (memory.rs, scanner.rs, injector.rs) are intentionally not compiled.
 
 use crate::adapters_proto::*;
 use anyhow::Result;

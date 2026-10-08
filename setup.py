@@ -81,7 +81,7 @@ def _run_setuptools() -> None:
 
     setup(
         name="ultron-desktop-assistant",
-        version="1.56.0",
+        version="1.57.0",
         description="ULTRON — Advanced Multi-Agent Desktop AI Assistant with Living Office & Autonomous Capabilities",
         long_description=(HERE / "readme.md").read_text(encoding="utf-8") if (HERE / "readme.md").exists() else "",
         long_description_content_type="text/markdown",

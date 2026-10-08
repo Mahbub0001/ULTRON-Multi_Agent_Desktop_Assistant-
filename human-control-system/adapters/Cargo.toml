@@ -33,6 +33,7 @@ tower = { workspace = true }
 # Async/Utils
 async-trait = { workspace = true }
 futures = { workspace = true }
+futures-util = "0.3"
 parking_lot = { workspace = true }
 dashmap = { workspace = true }
 crossbeam = { workspace = true }

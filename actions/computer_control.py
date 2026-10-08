@@ -1174,6 +1174,16 @@ def computer_control(
                     time.sleep(0.15)
                     _click(x=coords[0], y=coords[1], button=button, clicks=clicks)
                     return f"{'Double-c' if clicks == 2 else 'C'}licked '{desc}' at {coords} [{button}]"
+                try:
+                    from core import universal_operator
+                    res = universal_operator.execute_smart_operation(
+                        intent=desc, app=target_win or "", element=desc,
+                        action_type="double_click" if action == "double_click" else "click"
+                    )
+                    if res and not res.startswith("Error"):
+                        return res
+                except Exception:
+                    pass
                 return f"Element not found on screen: '{desc}'"
 
             # 3. Explicitly requested current position
@@ -1297,7 +1307,27 @@ def computer_control(
                 clicks = int(params.get("clicks", 1))
                 _click(x=coords[0], y=coords[1], button=button, clicks=clicks)
                 return f"{'Double-c' if clicks == 2 else 'C'}licked '{desc}' at {coords} [{button}]"
+            try:
+                from core import universal_operator
+                res = universal_operator.execute_smart_operation(
+                    intent=desc, app=target_win or "", element=desc,
+                    action_type="double_click" if int(params.get("clicks", 1)) == 2 else "click"
+                )
+                if res and not res.startswith("Error"):
+                    return res
+            except Exception:
+                pass
             return f"Element not found on screen: '{desc}'"
+
+        if action in ("operate", "smart_operate", "smart_action"):
+            from core import universal_operator
+            target_win = params.get("title") or params.get("app") or ""
+            desc = params.get("description") or params.get("element") or params.get("intent") or params.get("text") or ""
+            return universal_operator.execute_smart_operation(
+                intent=desc, app=target_win, element=desc,
+                text=params.get("text", ""),
+                action_type=str(params.get("action_type", "click")).lower()
+            )
 
         if action in ("screen_analyze", "analyze_screen"):
             target_win = params.get("title") or params.get("app") or ""
@@ -1469,13 +1499,13 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Complete computer & desktop app control: screen analysis (find all buttons on screen), type, click, mouse glide/hover, hotkeys, scroll, window management (focus, fullscreen, snap, restore, move monitor), tab management, text editing (copy, cut, paste, select all, find, zoom), system shortcuts (task manager, settings, file explorer, clipboard history, virtual desktops, lock), and app-specific hotkeys (VS Code, Chrome, Firefox, YouTube, Word, Excel, Notepad, Zoom, Discord, Spotify). For discovering buttons on screen, use action='screen_analyze'. For moving the mouse cursor to a specific button smoothly, use action='move' with description='...'. For clicking UI buttons by name or visual appearance, use action='screen_click' with description='...' or supply description='...' with click.",
+    "description": "Complete computer & desktop app control: operate (autonomous closed-loop interaction by intent across Zoom, Chrome, Excel, VS Code, etc.), screen analysis (find all buttons on screen), type, click, mouse glide/hover, hotkeys, scroll, window management (focus, fullscreen, snap, restore, move monitor), tab management, text editing (copy, cut, paste, select all, find, zoom), system shortcuts (task manager, settings, file explorer, clipboard history, virtual desktops, lock), and app-specific hotkeys (VS Code, Chrome, Firefox, YouTube, Word, Excel, Notepad, Zoom, Discord, Spotify). For discovering buttons on screen, use action='screen_analyze'. For moving the mouse cursor to a specific button smoothly, use action='move' with description='...'. For clicking UI buttons by name or visual appearance, use action='screen_click' with description='...' or supply description='...' with click.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "screen_analyze | screen_click | screen_find | move | click | double_click | right_click | type | smart_type | hotkey | press | scroll | drag | copy | cut | paste | screenshot | wait | clear_field | focus_window | list_windows | active_window | close_window | maximize_window | minimize_window | restore_window | fullscreen | snap_left | snap_right | move_window_monitor | close_tab | new_tab | reopen_tab | next_tab | prev_tab | select_all | find | print | save_as | zoom_in | zoom_out | zoom_reset | task_manager | run_dialog | settings | file_explorer | action_center | quick_settings | emoji_picker | clipboard_history | virtual_desktop_new | virtual_desktop_close | virtual_desktop_switch | lock_screen | app_shortcut | switch_app | save | undo | redo | random_data | user_data"
+                "description": "operate | screen_analyze | screen_click | screen_find | move | click | double_click | right_click | type | smart_type | hotkey | press | scroll | drag | copy | cut | paste | screenshot | wait | clear_field | focus_window | list_windows | active_window | close_window | maximize_window | minimize_window | restore_window | fullscreen | snap_left | snap_right | move_window_monitor | close_tab | new_tab | reopen_tab | next_tab | prev_tab | select_all | find | print | save_as | zoom_in | zoom_out | zoom_reset | task_manager | run_dialog | settings | file_explorer | action_center | quick_settings | emoji_picker | clipboard_history | virtual_desktop_new | virtual_desktop_close | virtual_desktop_switch | lock_screen | app_shortcut | switch_app | save | undo | redo | random_data | user_data"
             },
             "text": {
                 "type": "STRING",

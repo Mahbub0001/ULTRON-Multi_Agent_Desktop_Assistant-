@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # Main agent daemon - Windows version
+  hcs-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build.windows
+      target: runtime
+    container_name: hcs-agent
+    network_mode: host
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../data:/var/lib/hcs
+      - ../logs:/var/log/hcs
+    environment:
+      - RUST_LOG=info,hcs_agent=debug
+      - HCS_CONFIG=/etc/hcs/agent.toml
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+
+  # Vision inference server - CPU mode for Windows
+  hcs-vision:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.vision
+    container_name: hcs-vision
+    network_mode: host
+    ipc: host
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../models:/opt/hcs/models:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=-1
+      - ORT_TENSORRT_ENGINE_CACHE_ENABLE=0
+      - HCS_VISION_CONFIG=/etc/hcs/vision.toml
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 8G
+
+  # Brain/Decision engine
+  hcs-brain:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build.windows
+      target: runtime
+    container_name: hcs-brain
+    network_mode: host
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../wasm-plugins:/opt/hcs/wasm-plugins:ro
+      - ../data:/var/lib/hcs
+    environment:
+      - RUST_LOG=info,hcs_brain=debug
+      - HCS_BRAIN_CONFIG=/etc/hcs/brain.toml
+    depends_on:
+      - hcs-vision
+    restart: unless-stopped
+
+  # Orchestrator CLI/TUI
+  hcs-orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build.windows
+      target: runtime
+    container_name: hcs-orchestrator
+    network_mode: host
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../config:/etc/hcs:ro
+      - ../tasks:/opt/hcs/tasks:ro
+      - ../data:/var/lib/hcs
+      - ./orchestrator_history:/root/.hcs_history
+    environment:
+      - RUST_LOG=info
+      - HCS_ORCHESTRATOR_CONFIG=/etc/hcs/orchestrator.toml
+    entrypoint: ["hcs-orchestrator"]
+    profiles: ["cli"]
+
+volumes:
+  cargo-cache:
+  cargo-target:
+
+networks:
+  default:
+    name: hcs-network

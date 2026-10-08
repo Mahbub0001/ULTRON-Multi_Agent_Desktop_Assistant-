@@ -1,0 +1,44 @@
+# Vision Service Configuration
+
+[server]
+host = "0.0.0.0"
+port = 50051
+workers = 4
+
+[capture]
+# Screen capture settings
+backend = "auto"  # auto, dxcam, mss
+fps = 30
+monitor = 0       # 0 = primary, -1 = all
+region = null     # null = full screen, or [x, y, width, height]
+
+[detection]
+# YOLOv8 Detection settings
+model_path = "/opt/hcs/models/yolov8n.onnx"
+confidence_threshold = 0.5
+iou_threshold = 0.45
+max_detections = 100
+classes = null    # null = all classes, or list of class IDs
+device = "cpu"    # cpu, cuda, tensorrt
+batch_size = 1
+input_size = [640, 640]
+
+[ocr]
+# OCR settings
+engine = "tesseract"  # tesseract, paddle
+languages = ["eng"]
+confidence_threshold = 0.5
+use_gpu = false
+
+[models]
+# Model directory
+model_dir = "/opt/hcs/models"
+
+[logging]
+level = "INFO"
+format = "json"
+
+[metrics]
+enabled = true
+port = 9091
+path = "/metrics"

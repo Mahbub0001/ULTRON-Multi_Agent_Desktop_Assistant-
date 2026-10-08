@@ -1,0 +1,21 @@
+﻿[server]
+grpc_addr = "0.0.0.0:50051"
+http_addr = "0.0.0.0:8080"
+
+[driver]
+backend = "Synthetic"
+exclusive_mode = false
+injection_delay_us = 1000
+max_batch_size = 64
+
+[auth]
+enabled = false
+
+[logging]
+level = "debug"
+format = "Text"
+
+[metrics]
+enabled = true
+addr = "0.0.0.0:9090"
+path = "/metrics"

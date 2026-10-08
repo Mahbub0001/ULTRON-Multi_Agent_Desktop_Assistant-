@@ -145,11 +145,14 @@ def sys_is_darwin() -> bool:
     return sys.platform == "darwin"
 
 
-def _vision_click(description: str) -> bool:
+def _vision_click(description: str, window_title: str = "") -> bool:
     """Find something on screen with Gemini and click it. Best effort."""
     try:
-        from actions.computer_control import _screen_find
-        coords = _screen_find(description)
+        from actions.computer_control import _screen_find, _focus_window
+        if window_title:
+            _focus_window(window_title)
+            time.sleep(0.2)
+        coords = _screen_find(description, window_title=window_title)
         if not coords:
             return False
         import pyautogui
@@ -157,6 +160,50 @@ def _vision_click(description: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _look_game(window_title: str = "") -> str:
+    """Capture game screen and summarize current in-game state and HUD."""
+    try:
+        from actions.computer_control import _focus_window
+        import pyautogui
+        from PIL import ImageGrab
+        import io
+        from core import gemini
+        from google.genai import types as gtypes
+
+        if window_title:
+            _focus_window(window_title)
+            time.sleep(0.3)
+
+        img = None
+        try:
+            img = pyautogui.screenshot()
+        except Exception:
+            try:
+                img = ImageGrab.grab()
+            except Exception:
+                pass
+        if img is None:
+            return "Could not capture game screen."
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        image_bytes = buf.getvalue()
+
+        prompt = (
+            "Analyze this game screenshot. Describe in 2-3 concise sentences: "
+            "1. Current game state (main menu, in-game match, loading, settings, lobby). "
+            "2. Visible buttons or options the player can interact with. "
+            "3. Any important alerts or status info."
+        )
+        response = gemini.call(
+            [gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
+            tier="gemini-2.5-flash", timeout_ms=15_000,
+        )
+        return (response.text or "").strip() if response else "No response from vision."
+    except Exception as e:
+        return f"Could not inspect game screen: {e}"
 
 
 def _play_roblox(entry: dict, game_name: str) -> str:
@@ -212,18 +259,16 @@ def game_control(parameters: dict, response=None, player=None,
             lines = [f"- {v['title']} ({v['engine']})" for v in GAMES.values()]
             return "Known games:\n" + "\n".join(lines)
 
-        if not game:
-            return "Error: 'game' is required."
-
-        key = best_match(list(GAMES.keys()), game, min_score=0.35) or \
-            game.lower().strip()
-        entry = GAMES.get(key)
+        key = best_match(list(GAMES.keys()), game, min_score=0.35) if game else None
+        entry = GAMES.get(key) if key else None
 
         # ---- stop -------------------------------------------------------
         if action in ("stop", "close", "kill"):
-            names = _GAME_PROCESS.get(key) or (
-                _ROBLOX_PROCESS if (entry and entry.get("engine") == "roblox")
-                else (key,))
+            if not game:
+                return "Error: 'game' is required to stop."
+            names = _GAME_PROCESS.get(key) if key else None
+            if not names:
+                names = (_ROBLOX_PROCESS if (entry and entry.get("engine") == "roblox") else (game,))
             killed = _kill(tuple(names))
             if killed:
                 return f"Closed: {', '.join(killed)}."
@@ -231,6 +276,8 @@ def game_control(parameters: dict, response=None, player=None,
 
         # ---- play (default) ---------------------------------------------
         if action in ("play", "launch", "open", "start"):
+            if not game:
+                return "Error: 'game' is required to launch."
             if entry is None:
                 # Unknown title — try opening it as an app/alias.
                 from actions.open_app import open_app
@@ -255,7 +302,83 @@ def game_control(parameters: dict, response=None, player=None,
 
             return f"Game '{entry.get('title', game)}' has no launch method."
 
-        return (f"Unknown action '{action}'. Valid: play, stop, list.")
+        # ---- click / button in-game -------------------------------------
+        if action in ("click", "button", "menu"):
+            button = str(parameters.get("button", "") or parameters.get("element", "") or parameters.get("description", "")).strip()
+            if not button:
+                return "Error: 'button' or 'element' description is required for in-game click."
+            target_game = entry.get("title") if entry else game
+            from actions.computer_control import _screen_find, _focus_window
+            if target_game:
+                _focus_window(target_game)
+                time.sleep(0.25)
+            coords = _screen_find(button, window_title=target_game or "")
+            if coords:
+                import pyautogui
+                time.sleep(0.15)
+                pyautogui.click(coords[0], coords[1])
+                return f"Clicked in-game '{button}' at {coords}."
+            return f"In-game element '{button}' not found on screen."
+
+        # ---- press in-game key ------------------------------------------
+        if action in ("press", "key", "hotkey"):
+            key_name = str(parameters.get("key", "") or parameters.get("keys", "") or "esc").strip().lower()
+            target_game = entry.get("title") if entry else game
+            from actions.computer_control import _focus_window
+            if target_game:
+                _focus_window(target_game)
+                time.sleep(0.2)
+            import pyautogui
+            if "+" in key_name:
+                keys = [k.strip() for k in key_name.split("+")]
+                pyautogui.hotkey(*keys)
+                return f"Sent in-game hotkey '{key_name}'."
+            pyautogui.press(key_name)
+            return f"Pressed in-game key '{key_name}'."
+
+        # ---- type in-game -----------------------------------------------
+        if action in ("type", "chat"):
+            text = str(parameters.get("text", "")).strip()
+            if not text:
+                return "Error: 'text' is required for type."
+            target_game = entry.get("title") if entry else game
+            from actions.computer_control import _focus_window
+            if target_game:
+                _focus_window(target_game)
+                time.sleep(0.2)
+            import pyautogui
+            pyautogui.typewrite(text, interval=0.03)
+            return f"Typed in game: '{text}'."
+
+        # ---- configure in-game settings ---------------------------------
+        if action in ("configure", "setting", "settings"):
+            setting = str(parameters.get("setting", "") or parameters.get("option", "")).strip().lower()
+            target_game = entry.get("title") if entry else game
+            from actions.computer_control import _focus_window
+            if target_game:
+                _focus_window(target_game)
+                time.sleep(0.2)
+            import pyautogui
+            if setting in ("fullscreen", "full_screen"):
+                pyautogui.press("f11")
+                return "Toggled in-game fullscreen (F11)."
+            if setting in ("menu", "pause", "escape"):
+                pyautogui.press("esc")
+                return "Toggled in-game pause / menu (Esc)."
+            if setting in ("chat", "open_chat"):
+                pyautogui.press("/")
+                return "Opened in-game chat."
+            if setting in ("leaderboard", "scores"):
+                pyautogui.press("tab")
+                return "Toggled in-game leaderboard (Tab)."
+            return f"Configured '{setting}' in game."
+
+        # ---- look / inspect screen --------------------------------------
+        if action in ("look", "inspect", "state"):
+            target_game = entry.get("title") if entry else game
+            return _look_game(target_game)
+
+        return (f"Unknown action '{action}'. Valid: play, stop, list, click, press, type, configure, look.")
 
     except Exception as e:
         return f"game_control failed: {e}"
@@ -264,24 +387,41 @@ def game_control(parameters: dict, response=None, player=None,
 TOOL = {
     "name": "game_control",
     "description": (
-        "Launch and stop games. Actions: play (deep-link a Roblox experience "
-        "straight into the desktop client — waits for it to start and falls "
-        "back to the web page + clicking Play; launches Steam/app games "
-        "directly), stop (kill the game's process), list (show the game "
-        "library). Use for 'open Roblox and select Blox Fruits', 'play Tower "
-        "of Hell', 'launch Minecraft', or 'close the game'. Unknown titles "
-        "are tried as app names."),
+        "Launch, stop, configure, and control games & in-game interfaces. Actions: "
+        "play (deep-link Roblox experiences directly into client, launch Steam games, "
+        "or open game executables), stop (kill game process), list (show game library), "
+        "click (visually find and click in-game menu/button e.g. Play, Settings, Resume), "
+        "press (send in-game keys e.g. esc, space, f11), type (type in-game chat/inputs), "
+        "configure (toggle fullscreen, pause menu, chat), look (inspect active game screen "
+        "with vision and describe menu/HUD/state). Works across Roblox, Steam, Minecraft, and any PC game."
+    ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "enum": ["play", "stop", "list"],
+                "enum": ["play", "stop", "list", "click", "press", "type", "configure", "look"],
                 "description": "What to do.",
             },
             "game": {
                 "type": "STRING",
-                "description": "Game title, e.g. 'Blox Fruits', 'Minecraft', 'Roblox'.",
+                "description": "Game title, e.g. 'Blox Fruits', 'Minecraft', 'Roblox'. Optional if game is already active.",
+            },
+            "button": {
+                "type": "STRING",
+                "description": "Name or appearance of in-game button to click, e.g. 'Play', 'Settings', 'Resume', 'Join'.",
+            },
+            "key": {
+                "type": "STRING",
+                "description": "In-game key or shortcut to press, e.g. 'esc', 'space', 'f11', 'tab'.",
+            },
+            "text": {
+                "type": "STRING",
+                "description": "Text to type into in-game chat or inputs.",
+            },
+            "setting": {
+                "type": "STRING",
+                "description": "Setting to configure, e.g. 'fullscreen', 'menu', 'chat', 'leaderboard'.",
             },
         },
         "required": ["action"],
