@@ -1152,13 +1152,15 @@ class JarvisLive:
             if action == "start":
                 result = runtime.start(args.get("goal", ""))
             elif action == "resume":
-                result = runtime.start("", resume_id=task_id) if task_id else {"error": "task_id is required"}
+                result = runtime.start(args.get("goal", ""), resume_id=task_id) if task_id else {"error": "task_id is required"}
             elif action == "cancel":
                 result = runtime.cancel(task_id)
             elif action == "context":
                 result = await runtime.context()
-            else:
+            elif action == "status":
                 result = runtime.status(task_id)
+            else:
+                result = {"error": "Unknown task_control action"}
             return types.FunctionResponse(id=fc.id, name=fc.name, response={"result": result})
         outcome = await runtime.call(fc.name, args)
         # Include bounded shared context so references in follow-up requests can

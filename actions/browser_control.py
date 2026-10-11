@@ -857,17 +857,31 @@ class _BrowserSession:
         return page.url
 
     async def fill_form(self, fields: dict) -> str:
-        page    = await self._get_page()
-        results = []
+        if not isinstance(fields, dict) or not fields:
+            return "Error: Provide a nonempty mapping of field selectors to values."
+        page = await self._get_page()
+        targets = []
         for selector, value in fields.items():
             try:
-                el = page.locator(selector).first
-                await el.clear()
-                await el.type(str(value), delay=40)
-                results.append(f"✓ {selector}")
-            except Exception as e:
-                results.append(f"✗ {selector}: {e}")
-        return "Form filled: " + ", ".join(results)
+                el = page.locator(selector)
+                if await el.count() != 1:
+                    return f"Error: Field '{selector}' must match exactly one input; no fields changed."
+                targets.append((selector, el, str(value)))
+            except Exception as exc:
+                return f"Error: Could not locate field '{selector}': {exc}; no fields changed."
+        completed = []
+        for selector, el, value in targets:
+            try:
+                await el.fill(value, timeout=5000)
+                if await el.input_value() != value:
+                    raise RuntimeError("Input read-back did not match")
+                completed.append(selector)
+            except Exception as exc:
+                return (f"Error: Form incomplete; field '{selector}' outcome uncertain: {exc}. "
+                        f"Verified fields: {completed}. Inspect before retrying.")
+        from core.tool_result import VerifiedResult
+        return VerifiedResult("Verified form fields: " + ", ".join(completed),
+                              {"fields": completed, "values_match": True})
 
     async def smart_click(self, description: str) -> str:
         page = await self._get_page()

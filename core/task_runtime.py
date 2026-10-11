@@ -182,12 +182,12 @@ class TaskRuntime:
         self._action_lock = asyncio.Lock()
         self._unverified_direct = None
 
-    def _save(self):
+    def _save(self, required=False):
         try:
             self.store.save(self.tasks, self.working.snapshot())
         except OSError:
-            # Execution can continue if disk persistence is unavailable.
-            pass
+            if required:
+                raise
 
     def _update(self, task, status, detail):
         task.update(status=status, detail=str(detail)[:1500], updated=time.time())
@@ -221,6 +221,10 @@ class TaskRuntime:
                 return {"error": "This task cannot be resumed"}
             task["cancel_requested"] = False
             task["resuming"] = True
+            if str(goal).strip():
+                task.setdefault("clarifications", []).append(str(goal).strip()[:4000])
+                task["clarifications"] = task["clarifications"][-12:]
+                self.working.user(goal)
         else:
             task = {"id": uuid.uuid4().hex[:10], "goal": str(goal).strip()[:4000],
                     "status": "queued", "created": time.time(), "steps": [],
@@ -250,7 +254,9 @@ class TaskRuntime:
             if should_run is not None and not should_run():
                 return {"tool": name, "arguments": args, "result": "Cancelled before execution",
                         "status": "cancelled", "verified": False}
-            if not owner and not is_read_only(name, args) and any(
+            changes_focus = name in {"app_control", "browser_control", "excel_control"} or (
+                name == "computer_control" and bool(args.get("title") or args.get("app")))
+            if not owner and (not is_read_only(name, args) or changes_focus) and any(
                     task["status"] not in TERMINAL for task in self.tasks.values()):
                 return {"tool": name, "arguments": args, "result": "A task owns execution. Cancel it before starting conflicting actions.",
                         "status": "busy", "verified": False}
@@ -359,30 +365,45 @@ class TaskRuntime:
                     task["planner_feedback"] = "This exact action already failed or remains unverified. Observe, use a different approach, or clarify; do not repeat its side effects."
                     continue
                 self._update(task, "running", decision.get("reason") or f"Running {name}")
-                outcome = await self.call(name, args, lambda: not task["cancel_requested"], owner=task["id"])
-                step = {"id": len(task["steps"]) + 1, **outcome,
-                        "verification": "Read-only observation" if outcome["verified"] else "Not yet verified"}
+                # Persist the attempt BEFORE dispatch. After a crash, a native
+                # side effect may have completed without returning its result.
+                step = {"id": len(task["steps"]) + 1, "tool": name, "arguments": copy.deepcopy(args),
+                        "status": "executing", "verified": False, "verification": "Dispatch pending or outcome unknown",
+                        "verification_check": copy.deepcopy(check)}
                 task["steps"].append(step)
+                self._save(required=not is_read_only(name, args))
+                outcome = await self.call(name, args, lambda: not task["cancel_requested"], owner=task["id"])
+                step.update(outcome)
+                step["verification"] = (outcome.get("response_metadata", {}).get("evidence") or
+                                        "Read-only observation") if outcome["verified"] else "Not yet verified"
+                self._save()
                 if outcome["status"] == "waiting":
                     self._update(task, "waiting", "Action needs the user's confirmation. Confirm on screen, then resume to inspect the outcome.")
                     return
                 if task["cancel_requested"]:
                     self._update(task, "cancelled", "Stopped after the current operation; its outcome remains in task history.")
                     return
+                async def verify_call(name, args):
+                    return await self.call(name, args, owner=task["id"])
                 if outcome["status"] == "executed" and check:
                     self._update(task, "verifying", "Checking the actual result")
-                    async def verify_call(name, args):
-                        return await self.call(name, args, owner=task["id"])
                     passed, evidence = await self.verify(check, verify_call, self.observe)
                     step.update(verified=passed, verification=str(evidence)[:2400])
                 if not step["verified"]:
                     failures[signature] = failures.get(signature, 0) + 1
                     task["planner_feedback"] = "Action failed or remains unverified. Inspect evidence before retrying; do not duplicate outward effects."
                 else:
+                    task.pop("planner_feedback", None)
                     for old in task["steps"][:-1]:
                         if old["id"] in decision.get("resolves", []):
-                            old["resolved"] = step["id"]
-                    task.pop("planner_feedback", None)
+                            previous_check = old.get("verification_check")
+                            if previous_check:
+                                self.verify.validate(previous_check, catalog)
+                                passed, evidence = await self.verify(previous_check, verify_call, self.observe)
+                                if passed:
+                                    old.update(resolved=step["id"], verification=str(evidence)[:2400])
+                                    continue
+                            task["planner_feedback"] = "Repair not proven: the original step's postcondition must pass; an unrelated successful observation is insufficient."
                 self._save()
             self._update(task, "failed", "Reached the planning step limit without verified completion. Progress is saved.")
         except asyncio.CancelledError:

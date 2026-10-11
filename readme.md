@@ -306,10 +306,14 @@ python -m pytest tests -q
 ```
 
 ```
-146 passed, 1 skipped
+156 passed, 1 skipped
 ```
 
-All tests run cleanly on Windows 10/11 with Python 3.11–3.14.
+Verified in the current Windows environment with Python 3.14. The opt-in Excel
+COM integration test also passed separately. The independent vision service
+requires its own imports and dependencies; root-level test collection is not
+currently passing. See [business logic review](docs/business-logic-review.md)
+for coverage and remaining limitations.
 
 ---
 

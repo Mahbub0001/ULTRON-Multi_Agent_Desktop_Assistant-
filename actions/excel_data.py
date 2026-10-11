@@ -11,6 +11,8 @@ def matrix(params):
     data = params.get("data", [])
     if not isinstance(headers, list) or not all(isinstance(x, str) and x.strip() for x in headers):
         raise ValueError("headers must contain nonempty column names")
+    if any(len(h) > 255 for h in headers):
+        raise ValueError("Excel table headers must be at most 255 characters")
     if headers and len({h.casefold() for h in headers}) != len(headers):
         raise ValueError("Column names must be unique")
     if params.get("random_values"):
@@ -27,6 +29,9 @@ def matrix(params):
         data = [[None for _ in headers] for _ in range(count)]
     if not isinstance(data, list) or not data or not all(isinstance(row, (list, tuple)) for row in data):
         raise ValueError("data must be a nonempty 2D array: each inner array is ONE ROW")
+    if "row_count" in params and (not isinstance(params["row_count"], int)
+            or isinstance(params["row_count"], bool) or params["row_count"] != len(data)):
+        raise ValueError("row_count must equal the number of supplied data rows")
     width = len(headers) if headers else len(data[0])
     if not 1 <= width <= 256 or len(data) > 10000 or any(len(row) != width for row in data):
         raise ValueError("All rows must have exactly the same number of values as columns (max 10000 x 256)")
@@ -44,7 +49,8 @@ def matrix(params):
         # This is a values API. Never execute a formula hidden inside text.
         return "'" + value if value.startswith(("=", "+", "-", "@")) else value
     rows = [[cell(v) for v in row] for row in data]
-    return ([headers] if headers else []) + rows
+    literal_headers = ["'" + h if h.startswith(("=", "+", "-", "@")) else h for h in headers]
+    return ([literal_headers] if headers else []) + rows
 
 
 def _range(sheet, start, rows, columns):

@@ -32,6 +32,10 @@ class TestNativeExcel(unittest.TestCase):
             self.assertEqual(blank.evidence["data_rows"], 3)
             self.assertEqual(sheet.ListObjects.Item(1).ListRows.Count, 3)
             self.assertEqual(sheet.ListObjects.Item(1).ListColumns.Count, 5)
+            clear_table(excel, sheet, {})
+            write_data(excel, sheet, {"headers": ["=1+1"], "data": [["sample"]]}, True)
+            self.assertEqual(sheet.Range("A1").Value2, "=1+1")
+            self.assertFalse(sheet.Range("A1").HasFormula)
             wb.Close(False)
         finally:
             sheet = table = wb = None

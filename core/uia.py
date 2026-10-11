@@ -295,12 +295,18 @@ def click(app: str, element: str, timeout: float = 0.0) -> str:
     el = _locate(w, target)
     if el is None:
         raise RuntimeError("Target changed since observation; inspect it again")
+    from pywinauto.uia_defines import NoPatternInterfaceError
     try:
-        if hasattr(el, "invoke"):
+        el.iface_invoke
+        can_invoke = callable(getattr(el, "invoke", None))
+    except (AttributeError, NoPatternInterfaceError):
+        can_invoke = False
+    if can_invoke:
+        try:
             el.invoke()
             return f"Invoked '{target.name}' ({target.control_type or 'control'})."
-    except Exception:
-        pass
+        except Exception as exc:
+            return f"Error: Invoke outcome uncertain: {exc}. Inspect state before retrying."
     try:
         el.click_input()
         return f"Clicked '{target.name}' ({target.control_type or 'control'})."
@@ -335,18 +341,23 @@ def type_text(app: str, element: str, text: str, clear: bool = False,
     if el is None:
         raise RuntimeError("Input changed since observation; inspect it again")
 
+    from pywinauto.uia_defines import NoPatternInterfaceError
     try:
-        if clear:
-            el.set_edit_text(text)
-        else:
-            # Append: set to current value + new text when we can read it.
-            try:
-                current = el.window_text() or ""
-            except Exception:
-                current = ""
-            el.set_edit_text(current + text)
-        return f"Set text of '{target.name}'."
-    except Exception:
+        value_pattern = el.iface_value
+        can_set = callable(getattr(el, "set_edit_text", None))
+    except (AttributeError, NoPatternInterfaceError):
+        can_set = False
+    if can_set:
+        try:
+            current = "" if clear else value_pattern.CurrentValue
+            expected = current + text
+            el.set_edit_text(expected)
+            if value_pattern.CurrentValue != expected:
+                return "Error: Input read-back did not match; inspect before retrying."
+            return f"Set text of '{target.name}'."
+        except Exception as exc:
+            return f"Error: Text update outcome uncertain: {exc}. Inspect before retrying."
+    else:
         try:
             el.set_focus()
             if not el.has_keyboard_focus():
