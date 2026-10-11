@@ -17,7 +17,8 @@ def get_agent_status(agent_name: str = "") -> str:
             if a.state == AgentState.WORKING and a.current_task:
                 state_desc += f" — Working on: {a.current_task[:45]}..."
             lines.append(f"• {a.avatar_symbol} {a.name} ({a.role}): {state_desc} — {a.specialty}")
-        lines.append("All resident agents are active in Living Office and available for tasks, sir.")
+        available = sum(a.state != AgentState.WORKING for a in agents)
+        lines.append(f"{available} of {len(agents)} agents available for a new task.")
         return "\n".join(lines)
 
     agent = mgr.get_agent(agent_key)
@@ -28,7 +29,7 @@ def get_agent_status(agent_name: str = "") -> str:
     if agent.state == AgentState.IDLE:
         thought = agent.get_ambient_thought()
         return (
-            f"{agent.avatar_symbol} {agent.name} ({agent.role}) is currently FREE (IDLE) at her desk in Agent Town.\n"
+            f"{agent.avatar_symbol} {agent.name} ({agent.role}) is currently FREE (IDLE) in Agent Town.\n"
             f"Specialty: {agent.specialty}\n"
             f"Status: Standby and ready for your instructions, sir.\n"
             f"Current thought: '{thought}'"
@@ -46,7 +47,7 @@ def get_agent_status(agent_name: str = "") -> str:
             f"{agent.avatar_symbol} {agent.name} ({agent.role}) is currently FREE (Finished previous task).\n"
             f"Previous task: '{agent.current_task}'\n"
             f"Latest result: {res_summary or 'Completed successfully.'}\n"
-            f"She is ready for new instructions, sir."
+            f"Ready for new instructions."
         )
     else:
         return f"{agent.avatar_symbol} {agent.name} is in state: {agent.state.value}."
@@ -114,7 +115,8 @@ def delegate_agent_task(
         _log(msg, player)
         return msg
 
-    mgr.dispatch_task(agent.name, task, async_exec=True)
+    if not mgr.dispatch_task(agent.name, task, async_exec=True):
+        return f"{agent.name} is already working on another task. Check status before assigning a new one."
     msg = f"Task delegated to {agent.name} ({agent.role}): {task}"
     _log(msg, player)
 
