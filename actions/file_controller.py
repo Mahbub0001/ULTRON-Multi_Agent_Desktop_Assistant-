@@ -173,7 +173,8 @@ def _get_desktop() -> Path:
         xdg = os.environ.get("XDG_DESKTOP_DIR", "")
         if xdg and Path(xdg).exists():
             return Path(xdg)
-    return Path.home() / "Desktop"
+    from core.user_paths import desktop_path
+    return desktop_path()
 
 def _get_downloads() -> Path:
     if _OS == "Linux":

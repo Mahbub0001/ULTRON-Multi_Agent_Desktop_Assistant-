@@ -1,6 +1,9 @@
 """Opt-in test: owns a separate Excel process and never touches a user's workbook."""
 import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 from actions.excel_data import write_data, clear_table
 
 
@@ -36,7 +39,17 @@ class TestNativeExcel(unittest.TestCase):
             write_data(excel, sheet, {"headers": ["=1+1"], "data": [["sample"]]}, True)
             self.assertEqual(sheet.Range("A1").Value2, "=1+1")
             self.assertFalse(sheet.Range("A1").HasFormula)
-            wb.Close(False)
+            from actions.excel_control import _save
+            self.assertIn("Error: Workbook has no file location", _save(excel, sheet, {}))
+            with tempfile.TemporaryDirectory() as desktop:
+                with patch("core.user_paths.desktop_path", return_value=Path(desktop)):
+                    saved = _save(excel, sheet, {"path": "Desktop", "filename": "Ultron Test.xlsx"})
+                    saved_again = _save(excel, sheet, {"path": "Desktop", "filename": "Ultron Test.xlsx"})
+                self.assertIn("Verified workbook saved", saved)
+                self.assertIn("Verified workbook saved", saved_again)
+                self.assertEqual(Path(saved.evidence["path"]).parent, Path(desktop))
+                self.assertTrue((Path(desktop) / "Ultron Test.xlsx").is_file())
+                wb.Close(False)
         finally:
             sheet = table = wb = None
             import gc

@@ -306,7 +306,7 @@ python -m pytest tests -q
 ```
 
 ```
-160 passed, 1 skipped
+163 passed, 1 skipped
 ```
 
 Verified in the current Windows environment with Python 3.14. The opt-in Excel

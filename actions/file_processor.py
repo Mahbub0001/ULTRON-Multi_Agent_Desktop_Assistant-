@@ -180,6 +180,21 @@ def _process_image(path: Path, action: str, params: dict, speak=None) -> str:
 def _process_pdf(path: Path, action: str, params: dict, speak=None) -> str:
     action = action or "summarize"
 
+    if action in ("remember", "memorize"):
+        try:
+            import pdfplumber
+            with pdfplumber.open(path) as pdf:
+                pages = [page.extract_text() or "" for page in pdf.pages]
+            from memory.document_memory import remember_document
+            evidence = remember_document(path, pages)
+            return (f"Verified full text of '{evidence['name']}' saved to long-term document memory: "
+                    f"{evidence['pages']} pages, {evidence['characters']} characters. "
+                    "Ask about a specific detail to recall it.")
+        except ImportError:
+            return "Error: PDF reading library is unavailable. Nothing was remembered."
+        except Exception as exc:
+            return f"Error: Could not remember PDF: {exc}"
+
     def _extract_pdf_text(max_chars=50000) -> str:
         text = ""
         try:
@@ -274,6 +289,17 @@ def _process_text_doc(path: Path, file_type: str, action: str,
     content = _read_content()
     if not content.strip():
         return "File appears to be empty."
+
+    if action in ("remember", "memorize"):
+        if content.startswith(("Read failed:", "python-docx not installed")):
+            return f"Error: {content}"
+        try:
+            from memory.document_memory import remember_document
+            evidence = remember_document(path, [content])
+            return (f"Verified full text of '{evidence['name']}' saved to long-term document memory: "
+                    f"{evidence['characters']} characters.")
+        except Exception as exc:
+            return f"Error: Could not remember document: {exc}"
 
     if action == "word_count":
         words = len(content.split())
@@ -853,7 +879,7 @@ def file_processor(parameters: dict, player=None, speak=None) -> str:
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "file_processor",
-    "description": "Processes any file that the user has uploaded or dropped onto the interface. Use this when the user refers to an uploaded file and wants an action on it. Supports: images (describe/ocr/resize/compress/convert), PDFs (summarize/extract_text/to_word), Word docs & text files (summarize/fix/reformat/translate), CSV/Excel (analyze/stats/filter/sort/convert), JSON/XML (validate/format/analyze), code files (explain/review/fix/optimize/run/document/test), audio (transcribe/trim/convert/info), video (trim/extract_audio/extract_frame/compress/transcribe/info), archives (list/extract), presentations (summarize/extract_text). ALWAYS call this tool when a file has been uploaded and the user gives a command about it. If the user's command is ambiguous, pick the most logical action for that file type.",
+    "description": "Processes a file uploaded or dropped onto the interface. When the user asks to remember a PDF CV/resume, DOCX or text file, use action='remember' to preserve and verify its full readable text, not a brief summary. Scanned PDFs without text need OCR. Also supports the other file actions. ALWAYS call this tool for an uploaded file request.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -863,7 +889,7 @@ TOOL = {
             },
             "action": {
                 "type": "STRING",
-                "description": "What to do with the file. Examples by type:\nimage: describe | ocr | resize | compress | convert | info\npdf: summarize | extract_text | to_word | info\ndocx/txt: summarize | fix | reformat | translate_hint | word_count | to_bullet\ncsv/excel: analyze | stats | filter | sort | convert | info\njson: validate | format | analyze | to_csv\ncode: explain | review | fix | optimize | run | document | test\naudio: transcribe | trim | convert | info\nvideo: trim | extract_audio | extract_frame | compress | transcribe | info | convert\narchive: list | extract\npptx: summarize | extract_text | analyze"
+                "description": "PDF/DOCX/TXT: remember | summarize | extract_text | analyze. Use remember to preserve full readable text. Other files retain their usual actions."
             },
             "instruction": {
                 "type": "STRING",

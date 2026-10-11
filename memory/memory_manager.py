@@ -1,7 +1,7 @@
 import json
 import re
 from datetime import datetime
-from threading import Lock
+from threading import RLock
 from pathlib import Path
 import sys
 
@@ -14,8 +14,8 @@ def get_base_dir() -> Path:
 
 BASE_DIR         = get_base_dir()
 MEMORY_PATH      = BASE_DIR / "memory" / "long_term.json"
-_lock            = Lock()
-MAX_VALUE_LENGTH = 380
+_lock            = RLock()
+MAX_VALUE_LENGTH = 16_000
 
 # ── Why there are two very different numbers here ────────────────────────────
 #
@@ -138,10 +138,12 @@ def save_memory(memory: dict) -> None:
     memory = _trim_to_limit(memory)
     MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _lock:
-        MEMORY_PATH.write_text(
+        temporary = MEMORY_PATH.with_suffix(".tmp")
+        temporary.write_text(
             json.dumps(memory, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        temporary.replace(MEMORY_PATH)
 
 
 def _truncate_value(val: str) -> str:
@@ -181,11 +183,12 @@ def update_memory(memory_update: dict) -> dict:
     for cat, val in memory_update.items():
         canonical = _CATEGORY_ALIASES.get(str(cat).lower().strip(), str(cat))
         normalized[canonical] = val
-    memory = load_memory()
-    if _recursive_update(memory, normalized):
-        save_memory(memory)
-        print(f"[Memory] 💾 Saved: {list(normalized.keys())}")
-    return memory
+    with _lock:
+        memory = load_memory()
+        if _recursive_update(memory, normalized):
+            save_memory(memory)
+            print(f"[Memory] 💾 Saved: {list(normalized.keys())}")
+        return memory
 
 def _entry_value(entry) -> str:
     """Accept both the {'value': ..., 'updated': ...} shape and a bare string,
@@ -490,12 +493,16 @@ def search_memory(query: str, limit: int = 10) -> str:
             if s > 0:
                 rows.append((s, cat, key, val))
 
-    if not rows:
+    from memory.document_memory import search_documents
+    document_hits = search_documents(query, limit=limit)
+    if not rows and not document_hits:
         return (f"Nothing stored about '{query}'." if query
                 else "I have not stored anything about this person yet.")
 
     rows.sort(key=lambda r: (-r[0], r[2]))
-    lines = [f"{cat}/{_pretty(key)}: {val}" for _s, cat, key, val in rows[:max(1, limit)]]
+    fact_limit = max(1, limit - len(document_hits))
+    lines = [f"{cat}/{_pretty(key)}: {val}" for _s, cat, key, val in rows[:fact_limit]]
+    lines.extend(document_hits[:max(0, limit - len(lines))])
     head  = (f"Stored facts matching '{query}':" if query
              else "Everything currently stored:")
     more  = (f"\n(+{len(rows) - len(lines)} more — search with a narrower keyword)"
@@ -525,24 +532,32 @@ def all_entries_for_ui() -> list[dict]:
     return rows
 
 def remember(key: str, value: str, category: str = "notes") -> str:
+    if not str(key).strip() or not str(value).strip():
+        raise ValueError("Memory key and value are required")
+    value = str(value).strip()
+    if len(str(value)) > MAX_VALUE_LENGTH:
+        raise ValueError("Memory fact is too long; use document memory for uploaded files")
     category = _CATEGORY_ALIASES.get(str(category).lower().strip(), str(category))
     valid = {"identity", "preferences", "projects", "relationships", "wishes", "notes"}
     if category not in valid:
         category = "notes"
     update_memory({category: {key: {"value": value}}})
+    if _entry_value(load_memory().get(category, {}).get(key)) != value:
+        raise OSError("Memory write could not be verified")
     return f"Remembered: {category}/{key} = {value}"
 
 
 def forget(key: str, category: str = "notes") -> str:
     category = _CATEGORY_ALIASES.get(str(category).lower().strip(), str(category))
-    memory = load_memory()
-    cat    = memory.get(category, {})
-    if key in cat:
-        del cat[key]
-        memory[category] = cat
-        save_memory(memory)
-        return f"Forgotten: {category}/{key}"
-    return f"Not found: {category}/{key}"
+    with _lock:
+        memory = load_memory()
+        cat    = memory.get(category, {})
+        if key in cat:
+            del cat[key]
+            memory[category] = cat
+            save_memory(memory)
+            return f"Forgotten: {category}/{key}"
+        return f"Not found: {category}/{key}"
 
 
 forget_memory = forget

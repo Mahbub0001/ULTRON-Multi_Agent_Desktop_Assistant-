@@ -32,7 +32,8 @@ class TestFileController(unittest.TestCase):
 
     def test_resolve_path_formats(self):
         """Verify drive names, drive letters, and shortcuts are properly resolved."""
-        self.assertEqual(_resolve_path("desktop"), Path.home() / "Desktop")
+        from core.user_paths import desktop_path
+        self.assertEqual(_resolve_path("desktop"), desktop_path())
         self.assertEqual(_resolve_path("documents"), Path.home() / "Documents")
         
         if platform.system() == "Windows":

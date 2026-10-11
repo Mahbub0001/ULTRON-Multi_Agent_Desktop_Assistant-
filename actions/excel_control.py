@@ -401,15 +401,66 @@ def _read_sheet(excel, sheet, max_rows: int = 10) -> str:
         return f"Could not read Excel sheet: {e}"
 
 
-def _save(excel, sheet) -> str:
-    """Saves the active Excel workbook."""
+def _save(excel, sheet, params=None) -> str:
+    """Save to an explicit destination and verify the resulting file."""
+    params = params or {}
     if not excel or not excel.ActiveWorkbook:
-        return "No active Excel workbook to save."
+        return "Error: No active Excel workbook to save."
     try:
-        excel.ActiveWorkbook.Save()
-        return f"Workbook '{excel.ActiveWorkbook.Name}' saved successfully."
+        from core.tool_result import VerifiedResult
+        from core.user_paths import desktop_path
+        wb = excel.ActiveWorkbook
+        raw_path = str(params.get("path") or "").strip()
+        filename = str(params.get("filename") or "").strip()
+        if not raw_path and not filename:
+            if not wb.Path:
+                return "Error: Workbook has no file location. Provide path and filename to save it."
+            wb.Save()
+            target = Path(wb.FullName)
+        else:
+            if filename and (Path(filename).name != filename or any(c in filename for c in '<>:"/\\|?*')):
+                return "Error: filename must be a plain file name."
+            normalized = raw_path.replace("\\", "/")
+            head, sep, tail = normalized.partition("/")
+            if head.casefold() == "desktop":
+                requested = desktop_path() / tail if sep else desktop_path()
+            elif raw_path:
+                requested = Path(raw_path).expanduser()
+                if not requested.is_absolute():
+                    return "Error: Use an absolute path or Desktop for save location."
+            else:
+                requested = desktop_path()
+            if filename:
+                target = requested / filename
+            elif requested.suffix:
+                target = requested
+            else:
+                return "Error: Provide filename when path is a folder."
+            if not target.suffix:
+                target = target.with_suffix(".xlsx")
+            if target.suffix.casefold() != ".xlsx":
+                return "Error: This save action supports .xlsx only."
+            if not target.parent.is_dir():
+                return f"Error: Save folder does not exist: {target.parent}"
+            target = target.resolve()
+            current = Path(wb.FullName).resolve() if wb.Path else None
+            if target.exists() and target != current and not params.get("overwrite", False):
+                return f"Error: File already exists: {target}. Set overwrite only if the user asked to replace it."
+            if target == current:
+                wb.Save()
+            else:
+                alerts = excel.DisplayAlerts
+                try:
+                    excel.DisplayAlerts = False
+                    wb.SaveAs(str(target), FileFormat=51)
+                finally:
+                    excel.DisplayAlerts = alerts
+        if not target.is_file() or Path(wb.FullName).resolve() != target.resolve():
+            return f"Error: Save could not be verified at {target}."
+        return VerifiedResult(f"Verified workbook saved at {target}.",
+                              {"path": str(target), "size_bytes": target.stat().st_size})
     except Exception as e:
-        return f"Save failed: {e}"
+        return f"Error: Excel save failed: {e}"
 
 
 # ── Main Handler ─────────────────────────────────────────────────────────────
@@ -530,7 +581,7 @@ def _dispatch_excel(
         return _read_sheet(excel, sheet, max_rows=max_r)
 
     if action in ("save", "save_file"):
-        return _save(excel, sheet)
+        return _save(excel, sheet, params)
 
     if action in ("keyboard_autofit", "ribbon_autofit"):
         return _keyboard_autofit()
@@ -556,6 +607,7 @@ TOOL = {
         "Use new_workbook for a blank workbook; write_range to write data; clear_table to delete a named table and its cells. "
         "Each inner data array is ONE ROW, never one column. row_count excludes the header. For an empty table supply headers and row_count; for random numbers also set random_values=true. "
         "format_table ONLY styles existing data; it cannot create rows or values. "
+        "For save, pass path='Desktop' and filename='Name.xlsx' when the user specifies Desktop; save verifies the full file path. "
         "Use this tool whenever Nibir sir asks to format an Excel sheet, widen/fix cells, "
         "make cut-off text visible, auto-fit columns, add borders, style headers, or inspect Excel data. "
         "NEVER suggest Word or simulate manual mouse dragging to resize Excel columns; ALWAYS call excel_control! "
@@ -574,7 +626,7 @@ TOOL = {
             "row_count": {"type": "INTEGER", "description": "Number of data rows excluding header, for blank or random tables"},
             "random_values": {"type": "BOOLEAN", "description": "Generate numeric values 1..100 for each data row and column"},
             "start_cell": {"type": "STRING", "description": "Top-left cell, default A1"},
-            "overwrite": {"type": "BOOLEAN", "description": "Only true when user requested replacement of existing cells"},
+            "overwrite": {"type": "BOOLEAN", "description": "Replace existing cells or save file only when user requested it"},
             "table_name": {"type": "STRING", "description": "Exact Excel table name from read_sheet"},
             "workbook": {"type": "STRING", "description": "Expected active workbook name"},
             "sheet": {"type": "STRING", "description": "Target sheet name"},
@@ -601,8 +653,9 @@ TOOL = {
             },
             "path": {
                 "type": "STRING",
-                "description": "Optional file path if opening an Excel workbook"
-            }
+                "description": "File path for open, or save destination folder (e.g. Desktop) / full .xlsx path"
+            },
+            "filename": {"type": "STRING", "description": "Workbook file name for save, e.g. Ultron Test.xlsx"}
         },
         "required": ["action"]
     },

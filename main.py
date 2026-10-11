@@ -1188,15 +1188,16 @@ class JarvisLive:
             category = args.get("category", "notes")
             key      = args.get("key", "")
             value    = args.get("value", "")
-            if key and value:
-                remember(key, value, category)
-                print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+            try:
+                result = remember(key, value, category)
+            except Exception as exc:
+                result = f"Error: Memory was not saved: {exc}"
             self.set_speaking(False)
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
                 id=fc.id, name=name,
-                response={"result": f"Saved {category}/{key}: {value} to long-term memory.", "silent": True}
+                response={"result": result, "silent": True}
             )
 
         loop   = asyncio.get_event_loop()
