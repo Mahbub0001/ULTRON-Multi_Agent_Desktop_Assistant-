@@ -57,4 +57,3 @@ class TestAgentTownWorkflow(unittest.TestCase):
                 patch.object(self.manager, "execute_agent_tool", return_value="Exit Code: 1\nFAILED"):
             self.manager.dispatch_task("Bob", "Run tests", async_exec=False)
         self.assertEqual(agent.state, AgentState.ERROR)
-
