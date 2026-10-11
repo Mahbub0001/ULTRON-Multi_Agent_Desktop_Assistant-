@@ -316,8 +316,7 @@ class AgentTownManager:
                         {"query": query, "mode": mode}
                     )
                 except Exception as e:
-                    # Fallback simple search
-                    return f"Web search completed for '{query}'. Results gathered."
+                    return f"Error: Web search failed for '{query}': {e}"
 
             elif t_name == "write_file":
                 raw_path = str(args.get("path", "")).strip()
@@ -584,7 +583,7 @@ class AgentTownManager:
                         + "\n\n".join(conversation_log)
                     )
 
-                    response_text = gemini.text(prompt, tier=gemini.SMART, timeout_ms=60000)
+                    response_text = gemini.text(prompt, tier=gemini.REASONING, timeout_ms=60000)
                     if not response_text:
                         break
 
@@ -630,9 +629,12 @@ class AgentTownManager:
                             )
                             continue
 
-                    # If not structured JSON, treat response as final output
-                    final_answer = response_text
-                    break
+                    # Free-form text may be a plan or a hallucinated success;
+                    # require the action/final protocol before marking complete.
+                    conversation_log.append(
+                        "Protocol error: return one valid JSON tool action or a "
+                        "final_answer after checking the task outcome."
+                    )
 
                 if not final_answer:
                     agent.state = AgentState.ERROR

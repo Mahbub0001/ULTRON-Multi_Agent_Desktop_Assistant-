@@ -25,6 +25,7 @@ Equipped with a **software-rendered holographic 3D avatar with authentic viseme 
 |---|---|
 | 🏢 **Agent Department (Living Office)** | 4 autonomous resident agents (**Alice**, **Bob**, **Carol**, **Dave**) with independent ReAct loops, system tools, and live HUD canvas |
 | 🎙️ **Real-Time Gemini Live Engine** | Streaming bi-directional audio conversation with natural interruptions and instant acknowledgment |
+| 🧭 **Verified Task Coordinator** | Carries a software goal through planning, tool use, state checks and recovery; preserves progress across restarts |
 | 🧑‍🎤 **Holographic 3D Viseme Avatar** | ~50 mouth shapes/sec derived from acoustic formants and transcripts; software-rendered with 0% GPU overhead |
 | 📱 **Wireless Android Phone Control** | Seamless Wi-Fi ADB control: flashlight, apps (WhatsApp, YouTube, Camera), volume, screenshot, and battery |
 | 📄 **Executive Document & Word Engine** | Automatic Markdown to `.docx` conversion with 24pt Navy titles, 16pt/13pt headings, bold bullets, and margins |
@@ -36,6 +37,29 @@ Equipped with a **software-rendered holographic 3D avatar with authentic viseme 
 | 🧠 **Persistent Long-Term Memory** | Infinite storage with token-budgeted prompt indexing and sub-millisecond local recall |
 | ↩️ **Universal Undo System** | Instant one-word rollback for file movements, creations, renames, and OS setting changes |
 | 📊 **Hardware Telemetry HUD** | Live CPU, RAM, GPU, and temperature telemetry with proactive system health alerts |
+
+---
+
+## 🧭 Verified software tasks
+
+For a request with several dependent steps, ULTRON starts a background task and
+keeps the complete goal, recent conversation, current app and previous tool
+outcomes together. The planner chooses one action at a time from the available
+tools. State-changing actions need a separate check of the resulting file, app
+state or page content before the task can report completion. An uncertain send,
+publish or other side effect is not automatically repeated, including after a
+restart. The user can ask for task status, cancel it, or resume a waiting task.
+
+Task progress and working context are stored locally in `data/tasks/state.json`.
+The coordinator handles software workflows only and can still ask for a missing
+target or report when an app offers no reliable way to verify the result.
+
+The default response language is Bengali (`response_language` in configuration).
+Short foreign speech transcriptions do not request a language change. Excel data
+entry uses `new_workbook`, `create_table`, `write_range` and `clear_table`, with
+cell read-back and real Excel Table dimensions. `format_table` only styles existing
+data. Desktop controls verify focus and window state; visual clicks use fresh
+observations, and DOM interactions reject ambiguous matches.
 
 ---
 
@@ -267,7 +291,7 @@ Key packages (all auto-installed by `setup.py`):
 ## 🔒 Privacy & Local Security
 
 - **Zero Remote Telemetry:** ULTRON does not send metrics, logs, or analytics to any third-party server.
-- **Encrypted Local Storage:** All memory, conversation summaries, and configuration files live strictly on your local disk (`memory/` and `config/`).
+- **Local Storage:** Memory, conversation summaries, task state and configuration stay on your local disk (`memory/`, `data/tasks/` and `config/`). Task state is JSON and is not encrypted.
 - **No Secret Leaks:** Credentials and TLS keys are strictly git-ignored and guarded by automated security policies.
 - **Direct Gemini Connection:** Audio and vision streams travel encrypted directly between your PC and Google's Gemini Live API.
 
@@ -275,15 +299,14 @@ Key packages (all auto-installed by `setup.py`):
 
 ## 🧪 Testing & Verification
 
-ULTRON includes a rigorous test suite (65 tests) covering ReAct agent execution, music engine, document formatting, email, file controllers, and audio sessions:
+ULTRON includes tests for the task coordinator, desktop controls, Gemini Live configuration, agent execution, documents, email, file controllers and audio sessions:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v
+python -m pytest tests -q
 ```
 
 ```
-Ran 65 tests in 2.29s
-OK
+146 passed, 1 skipped
 ```
 
 All tests run cleanly on Windows 10/11 with Python 3.11–3.14.

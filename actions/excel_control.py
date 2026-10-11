@@ -109,12 +109,10 @@ def _get_active_excel():
 
     try:
         import win32com.client
-        _exit_cell_edit_mode()
-
         try:
             excel = win32com.client.GetActiveObject("Excel.Application")
         except Exception:
-            excel = win32com.client.Dispatch("Excel.Application")
+            return None, None, None
 
         if excel and excel.Workbooks.Count > 0:
             wb = excel.ActiveWorkbook
@@ -134,7 +132,8 @@ def _keyboard_autofit() -> str:
     """
     try:
         import pyautogui
-        _bring_excel_to_front()
+        from core.desktop_target import focus
+        focus("Excel")
         time.sleep(0.25)
 
         # Press Escape twice in case user was editing a cell
@@ -169,7 +168,7 @@ def _keyboard_autofit() -> str:
         pyautogui.press("a")
         time.sleep(0.15)
 
-        return "Excel columns and rows auto-fitted via keyboard ribbon sequence (Alt+H+O+I)."
+        return "Sent Excel autofit keyboard sequence. Result is unverified; inspect the sheet before claiming completion."
     except Exception as e:
         return f"Keyboard autofit failed: {e}"
 
@@ -177,7 +176,7 @@ def _keyboard_autofit() -> str:
 def _autofit(excel, sheet, columns: str = "") -> str:
     """Auto-fits all columns and rows in the active worksheet so text is never cut off."""
     if not sheet:
-        return _keyboard_autofit()
+        return "Error: No active worksheet to autofit."
 
     try:
         _bring_excel_to_front(excel)
@@ -204,7 +203,7 @@ def _autofit(excel, sheet, columns: str = "") -> str:
         )
     except Exception as e:
         print(f"[ExcelControl] COM autofit error: {e}, falling back to keyboard ribbon...")
-        return _keyboard_autofit()
+        return f"Error: Excel autofit failed: {e}. Inspect workbook state before retrying."
 
 
 def _format_table(
@@ -225,24 +224,25 @@ def _format_table(
     6. Complete column & row AutoFit so all data is 100% visible.
     """
     if not sheet:
-        return _keyboard_autofit()
+        return "Error: No active worksheet. Use new_workbook to create one."
 
     try:
         _bring_excel_to_front(excel)
         used = sheet.UsedRange
-        if not used or used.Count == 0:
-            return "Active worksheet appears to be empty."
+        if not used or not excel.WorksheetFunction.CountA(used):
+            return "Error: Worksheet is empty. format_table only formats existing data; use create_table with headers and data rows."
 
         row_count = used.Rows.Count
         col_count = used.Columns.Count
 
-        if row_count < 1 or col_count < 1:
-            return "No data found to format."
+        if row_count < 2 or col_count < 1:
+            return "Error: Need headers plus at least one data row. Use create_table or write_range to add rows first."
+        row_start, col_start = used.Row, used.Column
 
         palette = _STYLES.get(style_name.lower().strip(), _STYLES["navy"])
 
         # 1. Header row formatting
-        header_range = sheet.Range(sheet.Cells(1, 1), sheet.Cells(1, col_count))
+        header_range = sheet.Range(sheet.Cells(row_start, col_start), sheet.Cells(row_start, col_start + col_count - 1))
         header_range.Font.Bold = True
         header_range.Font.Color = palette["header_fg"]
         header_range.Interior.Color = palette["header_bg"]
@@ -252,17 +252,17 @@ def _format_table(
 
         # 2. Data rows vertical alignment and optional zebra shading
         if row_count > 1:
-            data_range = sheet.Range(sheet.Cells(2, 1), sheet.Cells(row_count, col_count))
+            data_range = sheet.Range(sheet.Cells(row_start + 1, col_start), sheet.Cells(row_start + row_count - 1, col_start + col_count - 1))
             data_range.VerticalAlignment = -4108  # xlCenter
             data_range.RowHeight = 20
 
             # Subtle alternating zebra shading
-            for r in range(2, row_count + 1):
+            for r in range(row_start + 1, row_start + row_count):
                 if r % 2 == 0:
-                    row_cells = sheet.Range(sheet.Cells(r, 1), sheet.Cells(r, col_count))
+                    row_cells = sheet.Range(sheet.Cells(r, col_start), sheet.Cells(r, col_start + col_count - 1))
                     row_cells.Interior.Color = palette["zebra_bg"]
                 else:
-                    row_cells = sheet.Range(sheet.Cells(r, 1), sheet.Cells(r, col_count))
+                    row_cells = sheet.Range(sheet.Cells(r, col_start), sheet.Cells(r, col_start + col_count - 1))
                     row_cells.Interior.ColorIndex = -4142  # xlNone (transparent/white)
 
         # 3. Clean gridline borders
@@ -316,8 +316,7 @@ def _format_table(
 
     except Exception as e:
         print(f"[ExcelControl] format_table COM error: {e}")
-        # At least attempt keyboard autofit
-        return _keyboard_autofit()
+        return f"Error: Table formatting failed: {e}. No new data rows were created."
 
 
 def _wrap_text(excel, sheet, columns: str = "", enable: bool = True) -> str:
@@ -358,7 +357,7 @@ def _read_sheet(excel, sheet, max_rows: int = 10) -> str:
         return "No active Excel sheet found."
     try:
         used = sheet.UsedRange
-        if not used or used.Count == 0:
+        if not used or not excel.WorksheetFunction.CountA(used):
             return "Active worksheet is empty."
 
         total_rows = used.Rows.Count
@@ -366,16 +365,16 @@ def _read_sheet(excel, sheet, max_rows: int = 10) -> str:
 
         # Read header names
         headers = []
-        for c in range(1, total_cols + 1):
-            val = sheet.Cells(1, c).Value
+        for c in range(used.Column, used.Column + min(total_cols, 256)):
+            val = sheet.Cells(used.Row, c).Value
             headers.append(str(val) if val is not None else f"Col{c}")
 
         # Read preview rows
         preview_lines = []
-        rows_to_read = min(total_rows, max_rows)
-        for r in range(2, rows_to_read + 1):
+        rows_to_read = min(total_rows, max(1, min(max_rows, 100)))
+        for r in range(used.Row + 1, used.Row + rows_to_read):
             row_vals = []
-            for c in range(1, total_cols + 1):
+            for c in range(used.Column, used.Column + min(total_cols, 256)):
                 val = sheet.Cells(r, c).Value
                 str_val = str(val).strip() if val is not None else ""
                 if len(str_val) > 35:
@@ -384,11 +383,15 @@ def _read_sheet(excel, sheet, max_rows: int = 10) -> str:
             preview_lines.append(" | ".join(row_vals))
 
         summary = (
+            f"Workbook: '{excel.ActiveWorkbook.Name}'\n"
             f"Active Sheet: '{sheet.Name}'\n"
             f"- Total Rows: {total_rows}\n"
             f"- Total Columns: {total_cols}\n"
             f"- Headers: [{', '.join(headers)}]\n"
         )
+        for i in range(1, sheet.ListObjects.Count + 1):
+            table = sheet.ListObjects.Item(i)
+            summary += f"- Table: {table.Name}, range={table.Range.Address}, data_rows={table.ListRows.Count}, columns={table.ListColumns.Count}\n"
         if preview_lines:
             summary += f"- Preview (rows 2 to {rows_to_read}):\n"
             summary += "\n".join(f"  Row {i+2}: {line}" for i, line in enumerate(preview_lines))
@@ -411,7 +414,7 @@ def _save(excel, sheet) -> str:
 
 # ── Main Handler ─────────────────────────────────────────────────────────────
 
-def excel_control(
+def _dispatch_excel(
     parameters: dict,
     response=None,
     player=None,
@@ -448,13 +451,44 @@ def excel_control(
     # Connect to active Excel
     excel, wb, sheet = _get_active_excel()
 
-    if not excel and action != "keyboard_autofit":
-        # Check if Excel window exists
-        return _keyboard_autofit()
+    if action == "new_workbook":
+        try:
+            if excel is None:
+                import win32com.client
+                excel = win32com.client.Dispatch("Excel.Application")
+            excel.Visible = True
+            wb = excel.Workbooks.Add()
+            wb.Activate()
+            from core.tool_result import VerifiedResult
+            if excel.ActiveWorkbook.Name != wb.Name or wb.Worksheets.Count < 1:
+                return "Error: New workbook could not be verified."
+            return VerifiedResult(f"Verified new workbook '{wb.Name}' with sheet '{wb.ActiveSheet.Name}'.",
+                                  {"workbook": wb.Name, "sheet": wb.ActiveSheet.Name})
+        except Exception as exc:
+            return f"Error: Could not create workbook: {exc}"
+
+    if not excel:
+        return "Error: No accessible Excel instance. Open Excel or call new_workbook. No keyboard fallback was run."
 
     if not wb or not sheet:
         # Excel is running with no open workbook or COM locked
-        return _keyboard_autofit()
+        return "Error: No active workbook. Use new_workbook before entering data."
+
+    if params.get("workbook") and wb.Name.casefold() != params["workbook"].casefold():
+        return f"Error: Active workbook is '{wb.Name}', not the requested workbook."
+    if params.get("sheet"):
+        try:
+            sheet = wb.Worksheets(params["sheet"])
+        except Exception:
+            return "Error: Requested sheet does not exist."
+
+    if action in ("create_table", "write_range", "clear_table"):
+        from actions.excel_data import write_data, clear_table
+        try:
+            return clear_table(excel, sheet, params) if action == "clear_table" else write_data(
+                excel, sheet, params, as_table=action == "create_table")
+        except Exception as exc:
+            return f"Error: Excel {action} failed: {exc}"
 
     # Route actions
     if action in ("autofit", "autofit_columns", "fit_columns", "auto_fit", "fit"):
@@ -501,15 +535,27 @@ def excel_control(
     if action in ("keyboard_autofit", "ribbon_autofit"):
         return _keyboard_autofit()
 
-    # Default fallback: autofit
-    return _autofit(excel, sheet)
+    return f"Error: Unknown Excel action '{action}'."
+
+
+def excel_control(parameters, response=None, player=None, session_memory=None):
+    # Each executor thread must initialize its own COM apartment.
+    import pythoncom
+    pythoncom.CoInitialize()
+    try:
+        return _dispatch_excel(parameters, response, player, session_memory)
+    finally:
+        pythoncom.CoUninitialize()
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "excel_control",
     "description": (
-        "Complete Microsoft Excel control & professional spreadsheet formatting. "
+        "Native Microsoft Excel data entry and formatting. create_table writes headers and a rectangular 2D data matrix and creates a real Excel Table, verifying every value and dimensions. "
+        "Use new_workbook for a blank workbook; write_range to write data; clear_table to delete a named table and its cells. "
+        "Each inner data array is ONE ROW, never one column. row_count excludes the header. For an empty table supply headers and row_count; for random numbers also set random_values=true. "
+        "format_table ONLY styles existing data; it cannot create rows or values. "
         "Use this tool whenever Nibir sir asks to format an Excel sheet, widen/fix cells, "
         "make cut-off text visible, auto-fit columns, add borders, style headers, or inspect Excel data. "
         "NEVER suggest Word or simulate manual mouse dragging to resize Excel columns; ALWAYS call excel_control! "
@@ -521,8 +567,18 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "autofit | format_table | wrap_text | freeze_header | filter | read_sheet | save | open"
+                "description": "new_workbook | create_table | write_range | clear_table | autofit | format_table | wrap_text | freeze_header | filter | read_sheet | save | open"
             },
+            "headers": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "One column name per item"},
+            "data": {"type": "ARRAY", "items": {"type": "ARRAY", "items": {"type": "STRING"}}, "description": "Rows of cell values; numbers may be strings. Every row must match headers length. No formulas."},
+            "row_count": {"type": "INTEGER", "description": "Number of data rows excluding header, for blank or random tables"},
+            "random_values": {"type": "BOOLEAN", "description": "Generate numeric values 1..100 for each data row and column"},
+            "start_cell": {"type": "STRING", "description": "Top-left cell, default A1"},
+            "overwrite": {"type": "BOOLEAN", "description": "Only true when user requested replacement of existing cells"},
+            "table_name": {"type": "STRING", "description": "Exact Excel table name from read_sheet"},
+            "workbook": {"type": "STRING", "description": "Expected active workbook name"},
+            "sheet": {"type": "STRING", "description": "Target sheet name"},
+            "max_rows": {"type": "INTEGER", "description": "Preview row limit for read_sheet"},
             "columns": {
                 "type": "STRING",
                 "description": "Optional column letter or range to format (e.g. 'A:D', 'B', 'Title')"

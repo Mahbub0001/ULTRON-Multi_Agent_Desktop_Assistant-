@@ -3,8 +3,8 @@
     "os_system": "windows",
     "camera_index": 0,
     "user_name": "Nibir",
+    "response_language": "Bengali",
     "android_device_ip": "",
-    "proactive_audio": false,
     "turn_tuning": {
         "enabled": false
     }

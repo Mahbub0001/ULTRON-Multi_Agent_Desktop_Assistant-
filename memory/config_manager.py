@@ -61,6 +61,12 @@ def get_user_name() -> str:
     return load_api_keys().get("user_name", "")
 
 
+def get_response_language() -> str:
+    """Stable voice preference, independent of noisy transcript language detection."""
+    value = load_api_keys().get("response_language", "Bengali")
+    return value.strip()[:80] if isinstance(value, str) and value.strip() else "Bengali"
+
+
 def save_assistant_config(assistant_name: str, user_name: str) -> None:
     """Persist assistant name and user name to config."""
     ensure_config_dir()
@@ -155,20 +161,6 @@ def save_hud_style(style: str) -> None:
 # config behaves exactly like a configured one. Each value is also a way out:
 # if a future model dislikes one of these, set it back and nothing else changes.
 
-def get_thinking_enabled() -> bool:
-    """Whether the Live model may spend tokens thinking before it answers.
-
-    Off by default. A voice assistant is judged on how fast it starts talking,
-    and the reasoning that actually needs deliberation in this app is delegated
-    to the planning tools, which run on a separate non-Live model.
-    """
-    return bool(load_api_keys().get("thinking_enabled", False))
-
-
-def save_thinking_enabled(enabled: bool) -> None:
-    _save_flag("thinking_enabled", enabled)
-
-
 def get_turn_tuning() -> dict:
     """How eagerly the server decides you have stopped speaking.
 
@@ -216,23 +208,6 @@ def save_turn_tuning(values: dict) -> None:
     cur.update(values or {})
     data["turn_tuning"] = cur
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
-
-
-def get_proactive_audio_enabled() -> bool:
-    """Whether the model gets to decide an utterance was not aimed at it and
-    stay quiet.
-
-    On by default — it is what stops the assistant answering the room. But it
-    is also the first thing to switch off if replies ever seem to arrive a turn
-    late: what looks like lag is usually the model having judged your previous
-    sentence as not addressed to it, and only changing its mind once the next
-    one arrives.
-    """
-    return bool(load_api_keys().get("proactive_audio", True))
-
-
-def save_proactive_audio_enabled(enabled: bool) -> None:
-    _save_flag("proactive_audio", enabled)
 
 
 MEDIA_RESOLUTIONS = ("default", "low", "medium", "high")

@@ -253,10 +253,16 @@ def close_window():
     else:               pyautogui.hotkey("ctrl", "w")
 
 def full_screen():
+    if _OS == "Windows":
+        from actions.computer_control import _fullscreen
+        return _fullscreen()
     if _OS == "Darwin": pyautogui.hotkey("ctrl", "command", "f")
     else:               pyautogui.press("f11")
 
 def minimize_window():
+    if _OS == "Windows":
+        from core.desktop_target import window_state
+        return window_state("minimize")
     if _OS == "Darwin": pyautogui.hotkey("command", "m")
     else:               pyautogui.hotkey("win", "down")
 
@@ -267,7 +273,8 @@ def maximize_window():
             'using {control down, command down}'],
             capture_output=True)
     elif _OS == "Windows":
-        pyautogui.hotkey("win", "up")
+        from core.desktop_target import window_state
+        return window_state("maximize")
     else:
         try:
             subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-b", "add,maximized_vert,maximized_horz"],
@@ -886,7 +893,9 @@ def computer_settings(
         _before = ("brightness", brightness_get())
 
     try:
-        func()
+        action_result = func()
+        if action_result is not None:
+            return action_result
     except Exception as e:
         print(f"[Settings] Action failed ({action}): {e}")
         return f"Action failed ({action}): {e}"

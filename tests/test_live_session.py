@@ -1,6 +1,9 @@
 import asyncio
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
+from google.genai import types
+from main import LIVE_MODEL
 from main import JarvisLive
 
 class TestLiveSession(unittest.IsolatedAsyncioTestCase):
@@ -67,6 +70,40 @@ class TestLiveSession(unittest.IsolatedAsyncioTestCase):
         self.live.set_speaking(False)
         self.assertFalse(self.live._is_speaking)
         self.mock_ui.set_state.assert_called_with("LISTENING")
+
+
+class TestGemini38Config(unittest.TestCase):
+    def test_gemini_38_live_config_preserves_sequential_tools(self):
+        self.assertEqual(LIVE_MODEL, "gemini-3.8-live")
+        live = JarvisLive.__new__(JarvisLive)
+        live._resume_handle = None
+        live._tuned_live = True
+        live._action_registry = MagicMock()
+        live._plugin_registry = MagicMock()
+        declarations = [{"name": "background_task", "description": "Run later",
+                         "behavior": "NON_BLOCKING", "parameters": {"type": "OBJECT", "properties": {}}}]
+        with (patch("main.API_CONFIG_PATH", Path("missing-api-config.json")),
+              patch("main.load_memory", return_value={}),
+              patch("main.format_memory_for_prompt", return_value=""),
+              patch("main._load_system_prompt", return_value=""),
+              patch("main.get_turn_tuning", return_value={"enabled": False}),
+              patch("main.get_media_resolution", return_value="default"),
+              patch("main.get_response_language", return_value="Bengali"),
+              patch.object(live._action_registry, "get_tool_declarations", return_value=declarations),
+              patch.object(live._plugin_registry, "get_tool_declarations", return_value=[])):
+            config = live._build_config()
+
+        self.assertIsInstance(config, types.LiveConnectConfig)
+        self.assertIn("[STABLE RESPONSE LANGUAGE]", config.system_instruction)
+        self.assertIn("Reply in Bengali", config.system_instruction)
+        self.assertIn("recognition errors", config.system_instruction)
+        self.assertIsNone(config.thinking_config)
+        self.assertIsNone(config.proactivity)
+        behaviors = {decl.name: decl.behavior for decl in config.tools[0].function_declarations}
+        self.assertEqual(behaviors["background_task"], types.Behavior.NON_BLOCKING)
+        self.assertTrue(all(behavior != types.Behavior.UNSPECIFIED for behavior in behaviors.values()))
+        self.assertTrue(all(behavior == types.Behavior.BLOCKING
+                            for name, behavior in behaviors.items() if name != "background_task"))
 
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,10 @@ def app_control(parameters: dict, response=None, player=None,
 
     if not action:
         return "Error: 'action' is required."
+    if action in ("click", "double_click") and not (element or intent):
+        return "Error: 'element' or 'intent' is required for click."
+    if action == "type" and not text:
+        return "Error: 'text' is required for type."
 
     # Auto-detect active foreground window if app is omitted
     if not app and action not in ("windows",):
@@ -92,6 +96,14 @@ def app_control(parameters: dict, response=None, player=None,
                 app = ctx.title
         except Exception:
             pass
+    if not app and action not in ("windows",):
+        return "Error: 'app' is required when no active window can be identified."
+
+    if action in ("operate", "interact", "smart_action", "click", "double_click", "type", "press"):
+        from actions.computer_control import _focus_window
+        focused = _focus_window(app)
+        if not focused.startswith("Focused window:"):
+            return focused
 
     try:
         # High-Speed Universal Autonomous Operation (OODA Loop with Closed-Loop Verification)

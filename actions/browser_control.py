@@ -736,10 +736,16 @@ class _BrowserSession:
         page = await self._get_page()
         try:
             if text:
-                await page.get_by_text(text, exact=False).first.click(timeout=8_000)
+                loc = page.get_by_text(text, exact=True)
+                if await loc.count() != 1:
+                    return "Error: Click target is missing or ambiguous; inspect the page and provide a unique selector."
+                await loc.click(timeout=8_000)
                 return f"Clicked text: '{text}'"
             if selector:
-                await page.click(selector, timeout=8_000)
+                loc = page.locator(selector)
+                if await loc.count() != 1:
+                    return "Error: Selector must identify exactly one element."
+                await loc.click(timeout=8_000)
                 return f"Clicked selector: {selector}"
             return "No selector or text provided."
         except PlaywrightTimeout:
@@ -751,10 +757,12 @@ class _BrowserSession:
                         clear_first: bool = True) -> str:
         page = await self._get_page()
         try:
-            el = page.locator(selector).first if selector else page.locator(":focus")
+            el = page.locator(selector) if selector else page.locator(":focus")
+            if await el.count() != 1:
+                return "Error: Input target is missing or ambiguous."
             if clear_first:
                 await el.clear()
-            await el.type(text, delay=50)
+            await el.fill(text) if clear_first else await el.type(text, delay=0)
             return "Text typed."
         except Exception as e:
             return f"Type error: {e}"
@@ -863,49 +871,41 @@ class _BrowserSession:
 
     async def smart_click(self, description: str) -> str:
         page = await self._get_page()
-        for role in ("button", "link", "searchbox", "textbox", "menuitem", "tab"):
-            try:
-                loc = page.get_by_role(role, name=description)
-                if await loc.count() > 0:
-                    await loc.first.click(timeout=5_000)
-                    return f"Clicked ({role}): '{description}'"
-            except Exception:
-                pass
-        for attempt in (
-            lambda: page.get_by_text(description, exact=False).first.click(timeout=5_000),
-            lambda: page.get_by_placeholder(description, exact=False).first.click(timeout=5_000),
-            lambda: page.locator(
-                f'[alt*="{description}" i],[title*="{description}" i],'
-                f'[aria-label*="{description}" i]'
-            ).first.click(timeout=5_000),
-        ):
-            try:
-                await attempt()
-                return f"Clicked: '{description}'"
-            except Exception:
-                pass
-        return f"Could not find element: '{description}'"
+        candidates = [page.get_by_role(role, name=description, exact=True)
+                      for role in ("button", "link", "menuitem", "tab")]
+        candidates += [page.get_by_text(description, exact=True), page.get_by_label(description, exact=True)]
+        for loc in candidates:
+            count = await loc.count()
+            if count > 1:
+                return "Error: Multiple elements match; inspect the page and identify a unique target."
+            if count == 1:
+                try:
+                    await loc.click(timeout=5000)
+                    return f"Clicked '{description}'; inspect resulting page state before reporting completion."
+                except Exception as exc:
+                    return f"Error: Click outcome uncertain: {exc}. Inspect before retrying."
+        return f"Error: Could not find element '{description}'."
 
     async def smart_type(self, description: str, text: str) -> str:
         page = await self._get_page()
-        candidates = [
-            ("placeholder", page.get_by_placeholder(description, exact=False)),
-            ("label",       page.get_by_label(description, exact=False)),
-            ("role",        page.get_by_role("textbox", name=description)),
-            ("searchbox",   page.get_by_role("searchbox")),
-            ("combobox",    page.get_by_role("combobox", name=description)),
-        ]
-        for method, loc in candidates:
-            try:
-                el = loc.first
-                if await el.count() == 0:
-                    continue
-                await el.clear()
-                await el.type(text, delay=50)
-                return f"Typed into ({method}): '{description}'"
-            except Exception:
-                continue
-        return f"Could not find input: '{description}'"
+        candidates = [page.get_by_label(description, exact=True),
+                      page.get_by_placeholder(description, exact=True),
+                      page.get_by_role("textbox", name=description, exact=True),
+                      page.get_by_role("combobox", name=description, exact=True)]
+        for loc in candidates:
+            count = await loc.count()
+            if count > 1:
+                return "Error: Multiple inputs match; use a unique label or selector."
+            if count == 1:
+                try:
+                    await loc.fill(text, timeout=5000)
+                    if await loc.input_value() != text:
+                        return "Error: Input read-back did not match requested text."
+                    from core.tool_result import VerifiedResult
+                    return VerifiedResult(f"Verified text in '{description}'.", {"input": description, "value_matches": True})
+                except Exception as exc:
+                    return f"Error: Input failed: {exc}"
+        return f"Error: Could not find input '{description}'."
 
     async def new_tab(self, url: str = "") -> str:
         page = await self._get_page()
@@ -1171,6 +1171,21 @@ def browser_control(
     # execute it directly on the active window via OS input instead of spinning
     # up an isolated automation browser that lacks their login sessions.
     if not _registry.has(browser):
+        from core.universal_operator import get_active_window
+        active = get_active_window()
+        if action not in ("search", "youtube_search", "switch_browser", "list_browsers") and active.app_category != "browser":
+            return "Error: No browser is in the foreground. Focus the intended browser before interacting."
+        if action == "get_text":
+            try:
+                from core import uia
+                info, controls = uia.list_controls(active.title, limit=80)
+                return f"Visible browser UI in {info.title}:\n" + "\n".join(c.name for c in controls)
+            except Exception as exc:
+                return f"Error: Browser UI could not be inspected: {exc}"
+        if action == "get_url":
+            return "Error: Current URL is unavailable without a connected DOM session; inspect the visible address bar."
+        if params.get("selector") and action in ("click", "type", "smart_click", "smart_type"):
+            return "Error: CSS selectors need a connected DOM session. For the current native browser use a visible element description."
         # 1. Profile / direct navigation check
         desc = (params.get("description") or params.get("text") or params.get("selector") or "").lower().strip()
         last_url = (_registry._last_native_url or "").lower()
@@ -1181,45 +1196,13 @@ def browser_control(
         except Exception:
             pass
 
-        # Smart web-app direct navigation interception for clicks
-        is_linkedin = "linkedin" in cur_title or "linkedin" in last_url or "linkedin" in desc
-        is_github = "github" in cur_title or "github" in last_url or "github" in desc
-        is_youtube = "youtube" in cur_title or "youtube" in last_url or "youtube" in desc
-
-        if action in ("click", "smart_click"):
-            if is_linkedin:
-                if "notification" in desc:
-                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/notifications"}, player=player)
-                if any(k in desc for k in ["message", "messaging", "inbox", "chat"]):
-                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/messaging"}, player=player)
-                if any(k in desc for k in ["network", "connection", "mynetwork"]):
-                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/mynetwork"}, player=player)
-                if any(k in desc for k in ["job", "jobs"]):
-                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/jobs"}, player=player)
-                if any(k in desc for k in ["feed", "home"]):
-                    return browser_control({"action": "go_to", "url": "https://www.linkedin.com/feed"}, player=player)
-
-            if is_github:
-                if "notification" in desc:
-                    return browser_control({"action": "go_to", "url": "https://github.com/notifications"}, player=player)
-                if "profile" in desc or "my profile" in desc:
-                    return browser_control({"action": "go_to", "url": "https://github.com/Mahbub0001"}, player=player)
-
-            if is_youtube:
-                if "subscription" in desc:
-                    return browser_control({"action": "go_to", "url": "https://www.youtube.com/feed/subscriptions"}, player=player)
-                if "history" in desc:
-                    return browser_control({"action": "go_to", "url": "https://www.youtube.com/feed/history"}, player=player)
-
-            if ("profile" in desc or "my profile" in desc or "account" in desc):
-                if "github" in last_url or not last_url:
-                    return browser_control({"action": "go_to", "url": "https://github.com/Mahbub0001"}, player=player)
-
         # 2. Native click / smart_click on active screen
         if action in ("click", "smart_click"):
             try:
                 from actions.computer_control import computer_control as _cc
-                res = _cc({"action": "screen_click", "description": desc or "the target element"}, player=player)
+                if not desc:
+                    return "Error: A visible target description is required."
+                res = _cc({"action": "screen_click", "description": desc, "title": active.title}, player=player)
                 _log(player, res)
                 return res
             except Exception as e:
@@ -1231,7 +1214,8 @@ def browser_control(
         if action in ("type", "smart_type") and not params.get("selector"):
             try:
                 from actions.computer_control import computer_control as _cc
-                res = _cc({"action": "smart_type", "text": params.get("text", "")}, player=player)
+                res = _cc({"action": "type", "text": params.get("text", ""),
+                           "description": params.get("description", ""), "title": active.title}, player=player)
                 _log(player, res)
                 return res
             except Exception as e:

@@ -76,7 +76,7 @@ def _norm(s: str) -> str:
 
 
 def _tokens(s: str) -> set[str]:
-    return {t for t in re.split(r"[^a-z0-9]+", _norm(s)) if t}
+    return {t for t in re.split(r"[^\w]+", _norm(s), flags=re.UNICODE) if t}
 
 
 def score(candidate: str, wanted: str) -> float:
@@ -95,7 +95,7 @@ def score(candidate: str, wanted: str) -> float:
         if ct.issubset(wt):          # e.g. "New Meeting" in "orange new meeting button"
             return 0.75
         if wt.issubset(ct):          # all wanted tokens inside candidate
-            return 0.70
+            return 0.69
         overlap_c = len(ct & wt) / len(ct)
         overlap_w = len(ct & wt) / len(wt)
         best_overlap = max(overlap_c, overlap_w)
@@ -169,46 +169,12 @@ def connect(app: str = "", timeout: float = 0.0):
     if err:
         raise RuntimeError(err)
     from pywinauto import Desktop
-
-    if not app or app.lower() in ("active", "current"):
-        try:
-            import win32gui
-            hwnd = win32gui.GetForegroundWindow()
-            if hwnd:
-                t = win32gui.GetWindowText(hwnd).strip()
-                if t:
-                    app = t
-        except Exception:
-            pass
-
-    deadline = time.time() + max(0.0, timeout)
-    last_titles: list[str] = []
-    while True:
-        try:
-            # Visible-only filtering happens below (see list_windows for why).
-            windows = list(Desktop(backend="uia").windows())
-            windows = [w for w in windows if _window_visible(w)]
-        except Exception as e:
-            raise RuntimeError(f"UIA desktop scan failed: {e}")
-
-        titles = [(w.window_text() or "").strip() for w in windows]
-        titles = [t for t in titles if t]
-        last_titles = titles
-        chosen = best_match(titles, app) if app else (titles[0] if titles else None)
-        if chosen:
-            for w in windows:
-                if (w.window_text() or "").strip() == chosen:
-                    try:
-                        w.set_focus()
-                    except Exception:
-                        pass
-                    return w
-        if time.time() >= deadline:
-            break
-        time.sleep(0.4)
-
-    hint = ", ".join(last_titles[:6]) if last_titles else "no windows found"
-    raise RuntimeError(f"No window matches '{app}'. Open windows: {hint}")
+    from core.desktop_target import focus
+    try:
+        hwnd = focus("" if not app or app.lower() in ("active", "current") else app)
+        return Desktop(backend="uia").window(handle=hwnd).wrapper_object()
+    except Exception as exc:
+        raise RuntimeError(f"Could not identify and focus target window: {exc}") from exc
 
 
 def window_info(app: str) -> WindowInfo:
@@ -292,11 +258,13 @@ def find(app: str, element: str, timeout: float = 0.0) -> Control:
     while True:
         controls = [c for c in _iter_controls(w) if c.visible and c.enabled]
         last = controls
-        chosen = best_match([c.name for c in controls], element)
+        chosen = best_match([c.name for c in controls], element, min_score=0.65)
         if chosen:
-            for c in controls:
-                if c.name == chosen:
-                    return c
+            matches = [c for c in controls if c.name == chosen]
+            locations = {c.rect for c in matches}
+            if len(locations) > 1:
+                raise RuntimeError(f"Ambiguous target '{element}': multiple visible controls match")
+            return matches[0]
         if time.time() >= deadline:
             break
         time.sleep(0.4)
@@ -310,8 +278,10 @@ def _locate(window, target: Control):
     """Re-find the live pywinauto element for a Control record."""
     for el in window.descendants():
         try:
+            rect = el.rectangle()
+            bounds = (rect.left, rect.top, rect.right, rect.bottom)
             if ((el.window_text() or "").strip() == target.name
-                    and el.is_visible()):
+                    and el.is_visible() and el.is_enabled() and bounds == target.rect):
                 return el
         except Exception:
             continue
@@ -324,11 +294,7 @@ def click(app: str, element: str, timeout: float = 0.0) -> str:
     target = find(app, element, timeout=timeout)
     el = _locate(w, target)
     if el is None:
-        # Coordinates still work even when the live handle moved on.
-        cx, cy = target.center
-        import pyautogui
-        pyautogui.click(cx, cy)
-        return f"Clicked '{target.name}' at ({cx},{cy}) by coordinates."
+        raise RuntimeError("Target changed since observation; inspect it again")
     try:
         if hasattr(el, "invoke"):
             el.invoke()
@@ -338,11 +304,8 @@ def click(app: str, element: str, timeout: float = 0.0) -> str:
     try:
         el.click_input()
         return f"Clicked '{target.name}' ({target.control_type or 'control'})."
-    except Exception:
-        cx, cy = target.center
-        import pyautogui
-        pyautogui.click(cx, cy)
-        return f"Clicked '{target.name}' at ({cx},{cy}) by coordinates."
+    except Exception as exc:
+        return f"Error: Click outcome uncertain: {exc}. Inspect state before retrying."
 
 
 def double_click(app: str, element: str, timeout: float = 0.0) -> str:
@@ -350,18 +313,12 @@ def double_click(app: str, element: str, timeout: float = 0.0) -> str:
     target = find(app, element, timeout=timeout)
     el = _locate(w, target)
     if el is None:
-        cx, cy = target.center
-        import pyautogui
-        pyautogui.doubleClick(cx, cy)
-        return f"Double-clicked '{target.name}' at ({cx},{cy})."
+        raise RuntimeError("Target changed since observation; inspect it again")
     try:
         el.double_click_input()
         return f"Double-clicked '{target.name}'."
-    except Exception:
-        cx, cy = target.center
-        import pyautogui
-        pyautogui.doubleClick(cx, cy)
-        return f"Double-clicked '{target.name}' at ({cx},{cy})."
+    except Exception as exc:
+        return f"Error: Double-click outcome uncertain: {exc}. Inspect state before retrying."
 
 
 def type_text(app: str, element: str, text: str, clear: bool = False,
@@ -376,14 +333,7 @@ def type_text(app: str, element: str, text: str, clear: bool = False,
     el = _locate(w, target)
 
     if el is None:
-        # Focus by coordinates, then let the keyboard do the work.
-        cx, cy = target.center
-        import pyautogui
-        pyautogui.click(cx, cy)
-        if clear:
-            pyautogui.hotkey("ctrl", "a")
-        pyautogui.write(text, interval=0.01) if text.isascii() else _paste(text)
-        return f"Typed into '{target.name}' via keyboard."
+        raise RuntimeError("Input changed since observation; inspect it again")
 
     try:
         if clear:
@@ -399,8 +349,10 @@ def type_text(app: str, element: str, text: str, clear: bool = False,
     except Exception:
         try:
             el.set_focus()
-        except Exception:
-            pass
+            if not el.has_keyboard_focus():
+                return "Error: Target input did not receive keyboard focus."
+        except Exception as exc:
+            return f"Error: Could not focus target input: {exc}"
         import pyautogui
         if clear:
             pyautogui.hotkey("ctrl", "a")
@@ -433,6 +385,7 @@ def _paste(text: str) -> None:
 def press(app: str, key: str, element: str = "") -> str:
     """Press a key, optionally after focusing a named element."""
     import pyautogui
+    w = connect(app)
     if element:
         target = find(app, element)
         w = connect(app)
@@ -441,11 +394,9 @@ def press(app: str, key: str, element: str = "") -> str:
             if el is not None:
                 el.set_focus()
             else:
-                cx, cy = target.center
-                pyautogui.click(cx, cy)
-        except Exception:
-            cx, cy = target.center
-            pyautogui.click(cx, cy)
+                return "Error: Key target changed since observation."
+        except Exception as exc:
+            return f"Error: Could not focus key target: {exc}"
     pyautogui.press(key)
     return f"Pressed '{key}'" + (f" in '{element}'." if element else ".")
 

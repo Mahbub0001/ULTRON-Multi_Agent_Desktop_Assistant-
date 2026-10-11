@@ -82,6 +82,7 @@ _KEY_FILE = _BASE / "config" / "api_keys.json"
 FAST = "fast"      # short classification, extraction, one-line decisions
 SMART = "smart"    # reasoning, generation, long documents, images
 SEARCH = "search"  # grounded search — REST only, see below
+REASONING = "reasoning"  # structured task planning — REST text models
 
 # A rung that means "ask the Live model instead", through a short throwaway
 # session rather than the REST text API.
@@ -120,11 +121,12 @@ _LADDERS = {
     # Live turn does not produce. REST only, and it says so rather than silently
     # returning an answer with no sources behind it.
     SEARCH: ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"),
+    REASONING: ("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"),
 }
 
 # The Live model to use for one-shot calls. main.py owns the real one; this is
 # only the fallback for when this module is imported without it (tests).
-_LIVE_FALLBACK = "models/gemini-3.1-flash-live-preview"
+_LIVE_FALLBACK = "gemini-3.8-live"
 
 # How many one-shot Live sessions may exist at once.
 #

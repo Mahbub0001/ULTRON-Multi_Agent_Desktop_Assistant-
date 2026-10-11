@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from actions.app_control import TOOL, app_control
 from core.action_loader import _validate
@@ -19,7 +21,8 @@ class TestDispatch(unittest.TestCase):
         self.assertIn("required", app_control({"app": "x"}))
 
     def test_missing_app(self):
-        self.assertIn("'app' is required", app_control({"action": "click"}))
+        with patch("core.universal_operator.get_active_window", return_value=SimpleNamespace(title="")):
+            self.assertIn("'app' is required", app_control({"action": "click", "element": "Save"}))
 
     def test_unknown_action_lists_valid_ones(self):
         out = app_control({"action": "teleport", "app": "Notepad"})
@@ -32,7 +35,7 @@ class TestDispatch(unittest.TestCase):
 
     def test_click_without_element(self):
         out = app_control({"action": "click", "app": "Notepad"})
-        self.assertIn("'element' is required", out)
+        self.assertIn("'element' or 'intent' is required", out)
 
 
 class TestLiveReadonly(unittest.TestCase):

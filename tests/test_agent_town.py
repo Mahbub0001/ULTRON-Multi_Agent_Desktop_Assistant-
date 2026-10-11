@@ -112,7 +112,7 @@ class TestAgentTown(unittest.TestCase):
         orig_text = getattr(gemini, "text", None)
 
         def mock_text(contents, **kwargs):
-            return "Mock research report from agent."
+            return '{"final_answer": "Mock research report from agent."}'
 
         try:
             gemini.text = mock_text

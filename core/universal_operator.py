@@ -1,23 +1,8 @@
-"""
-core/universal_operator.py — Universal Autonomous Desktop & Web Operating Engine.
+"""Desktop operation through focused UIA controls, known shortcuts and fresh vision.
 
-Provides the OODA (Observe -> Orient -> Decide -> Act -> Verify) closed-loop
-architecture for ANY native Windows application, desktop program, and web app.
-
-Features:
-1. Active Context Auto-Detection: Instantly identifies foreground window,
-   process, and app classification (Zoom, Browser, Office, VS Code, Media, etc.).
-2. Domain Intelligence: Pre-mapped intents and synonym dictionaries for top apps
-   (Zoom, Teams, Chrome, Edge, Excel, Word, VS Code, Discord, Spotify, Explorer).
-3. Multi-Tier Execution:
-   - Tier 0: Instant Native Shortcut / COM / API (<50ms)
-   - Tier 1: UIA Native Element Match & Direct Invoke (<100ms)
-   - Tier 2: Recent Screen Element Cache (0ms)
-   - Tier 3: Gemini 2.5 Flash Visual Grounding & Smooth Mouse Glide (~1s)
-4. Closed-Loop Verification & Auto-Correction:
-   - Verifies whether window state, controls, or target dialog actually changed.
-   - Auto-corrects unexpected UI states (e.g. recovering from Zoom Chat tab back
-     to Home and re-triggering Instant Meeting).
+Execution reports are separate from proof that the user's goal completed.
+Unknown targets and failed focus return errors; screenshot coordinates are never
+reused from an older page. Native Excel operations provide their own read-back.
 """
 from __future__ import annotations
 
@@ -142,39 +127,11 @@ def focus_app_window(target: str) -> bool:
     if not target or not _HAS_WIN32:
         return False
 
-    t_low = target.lower().strip()
-    matched_hwnd = None
-
-    def _enum_cb(hwnd, _):
-        nonlocal matched_hwnd
-        if win32gui.IsWindowVisible(hwnd):
-            txt = win32gui.GetWindowText(hwnd).strip()
-            if txt and t_low in txt.lower():
-                matched_hwnd = hwnd
-
     try:
-        win32gui.EnumWindows(_enum_cb, None)
-        if matched_hwnd:
-            if win32gui.IsIconic(matched_hwnd):
-                win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
-            else:
-                win32gui.ShowWindow(matched_hwnd, win32con.SW_SHOW)
-
-            cur_tid = win32api.GetCurrentThreadId()
-            win_tid, _ = win32process.GetWindowThreadProcessId(matched_hwnd)
-            if cur_tid != win_tid:
-                win32process.AttachThreadInput(cur_tid, win_tid, True)
-                win32gui.SetForegroundWindow(matched_hwnd)
-                win32gui.BringWindowToTop(matched_hwnd)
-                win32process.AttachThreadInput(cur_tid, win_tid, False)
-            else:
-                win32gui.SetForegroundWindow(matched_hwnd)
-                win32gui.BringWindowToTop(matched_hwnd)
-            time.sleep(0.15)
-            return True
+        from core.desktop_target import focus
+        return bool(focus(target))
     except Exception:
-        pass
-    return False
+        return False
 
 
 # ── Domain Intelligence & Semantic Synonym Dictionary ────────────────────────
@@ -284,7 +241,7 @@ APP_KNOWLEDGE = {
             "shortcut": ["alt", "h", "o", "i"],
         },
         "format_table": {
-            "synonyms": ["format table", "table banao", "executive table"],
+            "synonyms": ["format table", "format existing table"],
             "special_action": "excel_format_table",
             "shortcut": ["ctrl", "t"],
         },
@@ -345,37 +302,14 @@ APP_KNOWLEDGE = {
 
 def _match_intent(app_category: str, user_request: str) -> Optional[dict]:
     """Find matching intent definition from domain knowledge."""
-    req_clean = user_request.lower().strip()
-    words = set(re.findall(r"\w+", req_clean))
-
-    app_dicts = []
-    if app_category in APP_KNOWLEDGE:
-        app_dicts.append(APP_KNOWLEDGE[app_category])
-    app_dicts.append(APP_KNOWLEDGE["generic"])
-
-    best_entry = None
-    best_score = 0.0
-
-    for adict in app_dicts:
-        for iname, idata in adict.items():
-            for syn in idata.get("synonyms", []):
-                s_low = syn.lower()
-                if req_clean == s_low:
-                    return idata
-                if s_low in req_clean or req_clean in s_low:
-                    score = len(s_low) / max(len(req_clean), 1)
-                    if score > best_score:
-                        best_score = score
-                        best_entry = idata
-                syn_words = set(re.findall(r"\w+", s_low))
-                overlap = len(words & syn_words)
-                if overlap >= 2:
-                    score = overlap / len(syn_words)
-                    if score > best_score:
-                        best_score = score
-                        best_entry = idata
-
-    return best_entry if best_score >= 0.4 else None
+    request = user_request.casefold().strip()
+    if not request:
+        return None
+    for domain in (APP_KNOWLEDGE.get(app_category, {}), APP_KNOWLEDGE["generic"]):
+        for entry in domain.values():
+            if request in {value.casefold() for value in entry.get("synonyms", [])}:
+                return entry
+    return None
 
 
 def execute_smart_operation(
@@ -392,10 +326,13 @@ def execute_smart_operation(
     # Step 1: Resolve Target Window Context
     ctx = get_active_window()
     if app:
-        # Focus explicit app window
-        focus_app_window(app)
+        # A focus failure must never fall through into a different application.
+        if app.casefold() not in ctx.title.casefold() and not focus_app_window(app):
+            return f"Error: Could not focus target application '{app}'. No action was performed."
         time.sleep(0.2)
         ctx = get_active_window()
+        if app.casefold() not in ctx.title.casefold():
+            return f"Error: Target application '{app}' is not active. No action was performed."
     else:
         app = ctx.title
 
@@ -406,8 +343,6 @@ def execute_smart_operation(
     matched_intent = _match_intent(category, intent or element)
 
     # ── SPECIAL HANDLING: ZOOM MEETINGS ──────────────────────────────────────
-    if category == "zoom":
-        return _operate_zoom(ctx, intent, element, action_type)
 
     # ── SPECIAL HANDLING: EXCEL SPREADSHEETS ─────────────────────────────────
     if category == "excel" and matched_intent and matched_intent.get("special_action"):
@@ -430,20 +365,24 @@ def execute_smart_operation(
                 try:
                     if action_type in ("type", "write"):
                         res = uia.type_text(ctx.title, target_name, text, clear=True, timeout=0.3)
-                        return f"Successfully typed into '{target_name}' in {ctx.title}."
+                        if not res:
+                            raise RuntimeError("UIA typing returned no result")
+                        return f"{res} Outcome verification is still required."
                     else:
-                        res = uia.click(ctx.title, target_name, timeout=0.3)
+                        res = (uia.double_click if action_type == "double_click" else uia.click)(ctx.title, target_name, timeout=0.3)
+                        if not res:
+                            raise RuntimeError("UIA click returned no result")
                         time.sleep(0.2)
                         # Verify
                         new_ctx = get_active_window()
-                        return f"Clicked '{target_name}' in {ctx.title} (verified: window state active)."
+                        return f"{res} Outcome verification is still required."
                 except Exception:
                     pass
     except Exception:
         pass
 
     # ── TIER 0 FALLBACK: NATIVE HIGH-SPEED KEYBOARD SHORTCUT ─────────────────
-    if matched_intent and matched_intent.get("shortcut") and _HAS_PYAUTOGUI:
+    if category != "zoom" and action_type == "click" and matched_intent and matched_intent.get("shortcut") and _HAS_PYAUTOGUI:
         keys = matched_intent["shortcut"]
         try:
             pyautogui.hotkey(*keys)
@@ -456,103 +395,16 @@ def execute_smart_operation(
 
     # ── TIER 2: RECENT SCREEN ELEMENT CACHE & VISUAL GROUNDING ───────────────
     try:
-        from actions.computer_control import _screen_find, _click
+        from actions.computer_control import _screen_find, _click, _clipboard_paste
         coords = _screen_find(goal_desc, window_title=ctx.title)
         if coords:
-            _click(coords[0], coords[1], smooth=True)
+            _click(coords[0], coords[1], clicks=2 if action_type == "double_click" else 1, smooth=True)
             time.sleep(0.25)
+            if action_type in ("type", "write"):
+                _clipboard_paste(text)
+                return f"Typed into visually located '{goal_desc}' in {ctx.title}. Outcome verification is still required."
             return f"Visually located and clicked '{goal_desc}' at {coords} in {ctx.title}."
     except Exception:
         pass
 
-    return f"Executed action for '{goal_desc}' in {ctx.title}."
-
-
-def _operate_zoom(ctx: WindowContext, intent: str, element: str, action_type: str) -> str:
-    """Specialized high-reliability operator for Zoom Workplace."""
-    from actions.computer_control import _screen_find, _click, _focus_window
-    import pyautogui
-
-    query = (element or intent).lower().strip()
-
-    # Case 1: Start / Create New Meeting / Instant Meeting
-    if any(k in query for k in ("new meeting", "create meeting", "instant meeting", "মিটিং শুরু", "মিটিং ক্রিয়েট", "নতুন মিটিং", "start meeting")):
-        # First ensure Zoom is focused
-        _focus_window("Zoom")
-        time.sleep(0.15)
-
-        # Zoom Workplace Home check:
-        # If user inadvertently clicked Chat, window might be in Chat mode.
-        # Check if "Home" tab needs to be clicked first:
-        home_coords = _screen_find("Home tab", window_title="Zoom")
-        if home_coords:
-            # We see Home tab, click it to ensure dashboard view
-            _click(home_coords[0], home_coords[1], smooth=False)
-            time.sleep(0.15)
-
-        # Now locate the orange New Meeting button
-        nm_coords = _screen_find("orange New Meeting button", window_title="Zoom")
-        if not nm_coords:
-            nm_coords = _screen_find("New Meeting", window_title="Zoom")
-        if not nm_coords:
-            nm_coords = _screen_find("Start a Meeting", window_title="Zoom")
-
-        if nm_coords:
-            _click(nm_coords[0], nm_coords[1], smooth=True)
-            time.sleep(0.8)
-
-            # Verification: check if Meeting window opened
-            cur = get_active_window()
-            if "meeting" in cur.title.lower() or "zoom meeting" in cur.title.lower():
-                return f"Zoom: Successfully created and started New Meeting (verified: meeting room active)."
-            
-            # If still not verified, Zoom has instant meeting shortcut Alt+V
-            pyautogui.hotkey("alt", "v")
-            time.sleep(0.5)
-            return "Zoom: Clicked New Meeting and triggered instant meeting room."
-
-        # Direct instant meeting shortcut in Zoom
-        pyautogui.hotkey("alt", "v")
-        time.sleep(0.5)
-        return "Zoom: Triggered New Instant Meeting (Alt+V)."
-
-    # Case 2: Join Meeting
-    if any(k in query for k in ("join", "join meeting", "জয়েন")):
-        coords = _screen_find("Join button", window_title="Zoom")
-        if not coords:
-            coords = _screen_find("Join", window_title="Zoom")
-        if coords:
-            _click(coords[0], coords[1], smooth=True)
-            return "Zoom: Clicked Join button."
-        pyautogui.hotkey("alt", "j")
-        return "Zoom: Sent Join shortcut (Alt+J)."
-
-    # Case 3: Audio Mute / Unmute
-    if any(k in query for k in ("mute", "unmute", "audio", "mic", "মিউট", "আনমিউট")):
-        pyautogui.hotkey("alt", "a")
-        return "Zoom: Toggled audio mute/unmute (Alt+A)."
-
-    # Case 4: Video Camera Toggle
-    if any(k in query for k in ("video", "camera", "ভিডিও", "ক্যামেরা")):
-        pyautogui.hotkey("alt", "v")
-        return "Zoom: Toggled camera video (Alt+V)."
-
-    # Case 5: Fullscreen in Zoom
-    if any(k in query for k in ("fullscreen", "full screen", "ফুলস্ক্রিন")):
-        pyautogui.hotkey("alt", "f")
-        return "Zoom: Toggled fullscreen (Alt+F)."
-
-    # Case 6: End / Leave Meeting
-    if any(k in query for k in ("end", "leave", "মিটিং শেষ")):
-        pyautogui.hotkey("alt", "q")
-        time.sleep(0.2)
-        pyautogui.press("enter")
-        return "Zoom: Ended meeting."
-
-    # General element click in Zoom
-    coords = _screen_find(element or intent, window_title="Zoom")
-    if coords:
-        _click(coords[0], coords[1], smooth=True)
-        return f"Zoom: Clicked '{element or intent}' at {coords}."
-
-    return f"Zoom: Executed operation for '{element or intent}'."
+    return f"Error: Could not perform '{goal_desc}' in {ctx.title}; all control methods failed. Inspect app state before trying a different approach."

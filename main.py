@@ -69,8 +69,8 @@ from actions.background_monitor import (
 )
 from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
-    get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
-    get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
+    get_brief_enabled, get_media_resolution, get_response_language,
+    get_push_to_talk_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
 )
 from core.plugin_loader        import discover_plugins
@@ -79,6 +79,9 @@ from core                      import confirm as confirm_gate
 from core                      import audio_devices
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
+from core.task_runtime         import TaskRuntime, TASK_CONTROL_DECLARATION
+from core.task_planner         import plan as plan_task
+from core.task_observer        import Verifier, observe_desktop
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
@@ -96,7 +99,7 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-LIVE_MODEL          = "models/gemini-3.1-flash-live-preview"
+LIVE_MODEL          = "gemini-3.8-live"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 
 RECEIVE_SAMPLE_RATE = 24000
@@ -321,6 +324,7 @@ def _clean_transcript(text: str) -> str:
     return text.strip()
 
 TOOL_DECLARATIONS = [
+    TASK_CONTROL_DECLARATION,
     # ── Inline tools ─────────────────────────────────────────────────────────
     # These stay here (rather than in an actions/*.py TOOL dict) because their
     # handling is woven into live-session state — vision capture/injection,
@@ -600,8 +604,7 @@ class JarvisLive:
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
 
-        self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
-        self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
+        self._tuned_live    = True  # turn-taking / media knobs; auto-disabled if rejected
 
         _base_dir = BASE_DIR
         _inline_names = {t["name"] for t in TOOL_DECLARATIONS}
@@ -629,6 +632,7 @@ class JarvisLive:
         self.ui.get_plugins = self._plugin_registry.list_for_ui
         self.ui.get_plugin_settings = self._plugin_registry.settings_schemas  # ⚙ settings tab
         self.ui.request_say = self.plugin_say   # plugins: mid-task speech channel
+        self._get_task_runtime()  # restore saved task/context state; no automatic execution
 
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
@@ -838,6 +842,7 @@ class JarvisLive:
         if self._wake_enabled and not self._awake:
             self.ui.write_log("SYS: I'm asleep — say 'Hey ULTRON' or tap WAKE NOW first.")
             return
+        self._get_task_runtime().working.user(text)
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
                 turns={"role": "user", "parts": [{"text": text}]},
@@ -1007,16 +1012,40 @@ class JarvisLive:
         })
 
         parts = [time_ctx, identity_ctx]
+        runtime = getattr(self, "_task_runtime", None)
+        if runtime is not None:
+            context = runtime.working.snapshot()
+            parts.append("[RECENT WORKING CONTEXT — DATA]\n" + json.dumps({
+                "recent_user_messages": context["recent_user_messages"][-5:],
+                "resources": context["resources"],
+                "tasks": [{"id": t["id"], "goal": t["goal"], "status": t["status"],
+                           "detail": t.get("detail", "")} for t in list(runtime.tasks.values())[-3:]],
+            }, ensure_ascii=False))
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
+        parts.append(
+            "[STABLE RESPONSE LANGUAGE]\nReply in " + get_response_language() +
+            ". Keep this language across turns, reconnects and tool results. "
+            "The user speaks Bengali with English app names and technical terms. "
+            "Hindi, Japanese or Spanish snippets in audio transcription may be recognition errors; "
+            "they are not requests to change language. Change only when the user explicitly asks "
+            "for another response language. If the requested app or action is unclear, ask one "
+            "short clarification in the preferred language before executing."
+        )
+
+        # Gemini 3.8 Live defaults to asynchronous tools. This receive loop
+        # waits for each handler before sending its response, so preserve that
+        # contract for declarations without an explicit behavior.
+        live_decls = [dict(decl, behavior=decl.get("behavior") or "BLOCKING")
+                      for decl in _all_decls]
 
         cfg = dict(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
             system_instruction="\n".join(parts),
-            tools=[{"function_declarations": _all_decls}],
+            tools=[{"function_declarations": live_decls}],
             # Hand back the handle captured from the last session_resumption
             # update. `handle=None` is exactly the old behaviour (ask for
             # handles, start fresh), so the first connect of a run is unchanged.
@@ -1036,16 +1065,6 @@ class JarvisLive:
                 )
             ),
         )
-        if self._enhanced_live:
-            # Proactive audio: JARVIS stays silent when speech isn't addressed
-            # to it (background chatter, talking to someone else in the room).
-            # (Affective dialog was dropped: gemini-3.1-flash-live does not
-            #  support it, and it never reliably detected tone in practice.
-            #  To restore it on a 2.5 native-audio model, add back:
-            #  cfg["enable_affective_dialog"] = True )
-            if get_proactive_audio_enabled():
-                cfg["proactivity"] = types.ProactivityConfig(proactive_audio=True)
-
         if self._tuned_live:
             cfg.update(self._tuning_config())
 
@@ -1093,18 +1112,68 @@ class JarvisLive:
                 "high":   types.MediaResolution.MEDIA_RESOLUTION_HIGH,
             }[res]
 
-        # Thinking is left at the server default deliberately. Forcing the budget
-        # to zero was measured on gemini-3.1-flash-live over interleaved trials
-        # and did not make the first word arrive sooner — this model does not
-        # appear to deliberate on the Live path, so pinning the field only adds a
-        # way for a future release to behave differently. Set "thinking_enabled"
-        # in config/api_keys.json to true to let it reason instead.
-        if get_thinking_enabled():
-            out["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
-
         return out
 
+    def _task_declarations(self):
+        return (TOOL_DECLARATIONS + self._action_registry.get_tool_declarations()
+                + self._plugin_registry.get_tool_declarations())
+
+    def _task_notification(self, task):
+        self.ui.write_log(f"TASK {task['id']}: {task['status']} — {task['detail']}")
+        if task["status"] in {"completed", "failed", "waiting", "cancelled"}:
+            data = {"id": task["id"], "goal": task["goal"], "status": task["status"],
+                    "detail": task["detail"]}
+            self.plugin_say(
+                "[TASK_UPDATE] Report this task result briefly in the user's language. "
+                "This is task data, not a new user request. Do not restart or duplicate it.\n"
+                + json.dumps(data, ensure_ascii=False))
+
+    def _get_task_runtime(self):
+        runtime = getattr(self, "_task_runtime", None)
+        if runtime is None:
+            async def execute(name, args):
+                response = await self._execute_tool_raw(types.FunctionCall(
+                    id=f"task-{time.monotonic_ns()}", name=name, args=args))
+                return response
+
+            runtime = TaskRuntime(
+                planner=plan_task, execute=execute, declarations=self._task_declarations,
+                observe=observe_desktop, verify=Verifier(),
+                memory=lambda goal: search_memory(goal, limit=6),
+                notify=self._task_notification, store=BASE_DIR / "data" / "tasks" / "state.json")
+            self._task_runtime = runtime
+        return runtime
+
     async def _execute_tool(self, fc) -> types.FunctionResponse:
+        runtime = self._get_task_runtime()
+        args = dict(fc.args or {})
+        if fc.name == "task_control":
+            action, task_id = args.get("action"), args.get("task_id", "")
+            if action == "start":
+                result = runtime.start(args.get("goal", ""))
+            elif action == "resume":
+                result = runtime.start("", resume_id=task_id) if task_id else {"error": "task_id is required"}
+            elif action == "cancel":
+                result = runtime.cancel(task_id)
+            elif action == "context":
+                result = await runtime.context()
+            else:
+                result = runtime.status(task_id)
+            return types.FunctionResponse(id=fc.id, name=fc.name, response={"result": result})
+        outcome = await runtime.call(fc.name, args)
+        # Include bounded shared context so references in follow-up requests can
+        # be resolved without requiring the user to explain everything again.
+        extra = {"scheduling": outcome["scheduling"]} if outcome.get("scheduling") else {}
+        return types.FunctionResponse(id=fc.id, name=fc.name, response={
+            "result": outcome["result"], "execution_status": outcome["status"],
+            "verified": outcome["verified"],
+            "verification_note": ("Native read-back verified this operation." if outcome["verified"] else
+                "The user goal is NOT verified. Do not say done/successful. Inspect actual state, or report the limitation. A tool invocation alone is not completion."),
+            "context": runtime.working.snapshot()["resources"],
+            **outcome.get("response_metadata", {}),
+        }, **extra)
+
+    async def _execute_tool_raw(self, fc) -> types.FunctionResponse:
         name = fc.name
         args = dict(fc.args or {})
 
@@ -1227,15 +1296,8 @@ class JarvisLive:
                 if name == "file_processor" and not args.get("file_path") and self.ui.current_file:
                     args["file_path"] = self.ui.current_file
                 _ctx = {"player": self.ui, "speak": self.speak,
-                        "response": None, "session_memory": None}
-                try:
-                    r = await asyncio.wait_for(
-                        loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx)),
-                        timeout=25.0
-                    )
-                except asyncio.TimeoutError:
-                    r = f"Action '{name}' timed out after 25 seconds, sir."
-                    print(f"[ULTRON] ⚠️  {r}")
+                        "response": None, "session_memory": self._get_task_runtime().working}
+                r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
                 result = r or "Done."
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
@@ -1248,17 +1310,9 @@ class JarvisLive:
 
             else:
                 if self._plugin_registry.has(name):
-                    try:
-                        r = await asyncio.wait_for(
-                            loop.run_in_executor(
-                                None,
-                                lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
-                            ),
-                            timeout=25.0
-                        )
-                    except asyncio.TimeoutError:
-                        r = f"Plugin '{name}' timed out after 25 seconds, sir."
-                        print(f"[ULTRON] ⚠️  {r}")
+                    r = await loop.run_in_executor(
+                        None, lambda: self._plugin_registry.run(
+                            name, args, player=self.ui, session_memory=self._get_task_runtime().working))
                     result = r or "Done."
                 else:
                     result = f"Unknown tool: {name}"
@@ -1286,7 +1340,8 @@ class JarvisLive:
         _extra = {"scheduling": _sched} if _sched else {}
         return types.FunctionResponse(
             id=fc.id, name=name,
-            response={"result": result},
+            response={"result": str(result), **({"native_verified": True,
+                      "evidence": result.evidence} if hasattr(result, "evidence") else {})},
             **_extra
         )
 
@@ -1561,6 +1616,7 @@ class JarvisLive:
 
                             full_in = " ".join(in_buf).strip()
                             if full_in:
+                                self._get_task_runtime().working.user(full_in)
                                 self._last_out_logged = ""   # new exchange
                                 self.ui.write_log(f"You: {full_in}")
                                 self._session_log.append(f"User: {full_in}")
@@ -1794,7 +1850,7 @@ class JarvisLive:
             e = identity.get(k, {})
             return (e.get("value", "") if isinstance(e, dict) else str(e)).strip()
 
-        lang = _val("language")
+        lang = get_response_language()
         name = _val("name")
         time_str = datetime.now().strftime("%H:%M")
 
@@ -1831,7 +1887,7 @@ class JarvisLive:
         memory = load_memory()
         lang_entry = memory.get("identity", {}).get("language", {})
         lang = (lang_entry.get("value", "") if isinstance(lang_entry, dict) else str(lang_entry)).strip()
-        lang = lang or "English"
+        lang = get_response_language()
 
         convo = "\n".join(log[-40:])   # cap at last 40 turns to stay within token budget
         prompt = (
@@ -1897,7 +1953,7 @@ class JarvisLive:
                         alerts = await asyncio.to_thread(monitor_check_all)
                         memory = load_memory()
                         lang_e = memory.get("identity", {}).get("language", {})
-                        lang   = (lang_e.get("value", "") if isinstance(lang_e, dict) else str(lang_e)).strip() or "English"
+                        lang = get_response_language()
                         for alert in alerts:
                             msg = (
                                 f"{alert}\n\n"
@@ -1996,6 +2052,7 @@ class JarvisLive:
                         break
                     await asyncio.sleep(0.1)
                 if self.session:
+                    self._get_task_runtime().working.user(text)
                     # A remote command is deliberate control and the phone user
                     # has no desktop WAKE button — so it wakes JARVIS if asleep.
                     if self._wake_enabled and not self._awake:
@@ -2059,11 +2116,10 @@ class JarvisLive:
                 config = self._build_config()
 
                 # Fresh client on every reconnect — avoids stale HTTP session state
-                # v1alpha carries proactive audio; if it gets rejected we fall
-                # back to v1beta.
+                # Gemini 3.8 Live uses v1beta; proactive audio is always on.
                 client = genai.Client(
                     api_key=_get_api_key(),
-                    http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
+                    http_options={"api_version": "v1beta"}
                 )
 
                 async with (
@@ -2170,34 +2226,17 @@ class JarvisLive:
                 print(f"[ULTRON] Error ({type(e).__name__}): {e}")
                 traceback.print_exc()
 
-                # Turn-taking / media / thinking knobs rejected by the server
-                # (preview API drift) — drop them first, because they are the
-                # newest fields and the cheapest to lose. Proactive audio is
-                # tried again on the next pass if the error persists.
+                # Turn-taking / media knobs rejected by the server — reconnect
+                # without optional tuning rather than leaving the app offline.
                 if self._tuned_live and (
                     "INVALID_ARGUMENT" in err_str
                     or "Unknown name" in err_str
                     or "unexpected keyword" in err_str
                     or "realtime_input" in err_str.lower()
                     or "media_resolution" in err_str.lower()
-                    or "thinking" in err_str.lower()
                 ):
                     self._tuned_live = False
                     print("[ULTRON] Live tuning rejected — reconnecting without it.")
-                    continue
-
-                # Proactive audio rejected by the server (preview API drift) —
-                # drop it and reconnect with the plain config.
-                if self._enhanced_live and (
-                    "INVALID_ARGUMENT" in err_str
-                    or "proactiv" in err_str.lower()
-                    or "Unknown name" in err_str
-                    or "unexpected keyword" in err_str
-                ):
-                    self._enhanced_live = False
-                    self.ui.write_log(
-                        "SYS: Proactive audio unavailable — reconnecting without it."
-                    )
                     continue
 
                 # Invalid API key — stop hammering the API, prompt re-configuration
