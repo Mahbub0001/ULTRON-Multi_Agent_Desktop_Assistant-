@@ -135,8 +135,13 @@ does not identify one.
        - For Google Drive: browser_control(action='go_to', url='https://drive.google.com').
        - For ChatGPT: browser_control(action='go_to', url='https://chatgpt.com').
    - To scroll: browser_control(action='scroll', direction='down'|'up').
+   - To keep scrolling until the user says stop: browser_control(action='start_scroll'); on stop call browser_control(action='stop_scroll').
    - To click buttons, links, or inputs: browser_control(action='smart_click', description='...') or computer_control(action='screen_click', description=...).
+   - Inspect the current page before a visual click or when the target is uncertain; simple shortcuts such as new_tab and volume_get do not need a separate screen analysis.
+   - For LinkedIn Home, Notifications, My Network or Messaging visible in the current page, click the named element; do not guess or abbreviate URL paths.
    - Tab management: browser_control with action='new_tab', action='close_tab', action='next_tab', action='prev_tab', action='reopen_tab'.
+   - To open one more tab in the existing browser, use browser_control(action='new_tab') while it is foreground. Do not call open_app('chrome'). To close only LinkedIn tabs, use browser_control(action='close_tabs', domain='linkedin.com'); never close the whole browser/window. If tab enumeration is unavailable, say so and leave tabs intact.
+   - To read current computer output volume call computer_settings(action='volume_get'); distinguish default output volume from a separate Bluetooth device level.
    - To search on the web: browser_control(action='search', query=...).
    - To find text on page: browser_control(action='find', text=...).
 

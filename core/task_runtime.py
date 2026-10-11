@@ -20,6 +20,7 @@ from typing import Callable
 
 
 READ_ACTIONS = {
+    "computer_settings": {"volume_get", "get_volume", "volume_status"},
     "app_control": {"state", "elements", "windows"},
     "computer_control": {"active_window", "list_windows", "screen_analyze", "screenshot"},
     "browser_control": {"get_text", "get_url", "screenshot", "list_browsers"},

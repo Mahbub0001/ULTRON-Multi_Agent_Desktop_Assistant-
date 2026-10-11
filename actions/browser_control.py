@@ -9,9 +9,11 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     try:
@@ -27,6 +29,68 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeout,
 )
 _OS = platform.system()   # "Windows" | "Darwin" | "Linux"
+
+
+def _incomplete_linkedin_url(url: str) -> bool:
+    """Reject short model-invented paths such as /fee and /not."""
+    parsed = urlsplit(_normalize_url(url))
+    host = (parsed.hostname or "").casefold()
+    if host != "linkedin.com" and not host.endswith(".linkedin.com"):
+        return False
+    part = parsed.path.strip("/").casefold()
+    known = ("feed", "notifications", "messaging", "mynetwork", "jobs")
+    return bool(part and len(part) < 5 and any(name.startswith(part) and name != part for name in known))
+
+
+def _native_browser_window():
+    from core.universal_operator import get_active_window
+    active = get_active_window()
+    if active.app_category != "browser":
+        return None
+    title = active.title.casefold()
+    if "who's using chrome" in title or "choose a profile" in title:
+        return None
+    return active
+
+
+def _read_native_url() -> str:
+    import pyautogui
+    import pyperclip
+    previous = pyperclip.paste()
+    try:
+        pyautogui.hotkey("ctrl", "l")
+        pyautogui.hotkey("ctrl", "c")
+        import time
+        time.sleep(0.08)
+        return pyperclip.paste().strip()
+    finally:
+        pyautogui.press("esc")
+        pyperclip.copy(previous)
+
+
+def _navigate_native_url(url: str) -> str:
+    """Navigate the foreground browser tab and read its actual address."""
+    if not _native_browser_window():
+        return "Error: No browser tab is in the foreground."
+    import pyautogui
+    import pyperclip
+    previous = pyperclip.paste()
+    try:
+        pyautogui.hotkey("ctrl", "l")
+        pyperclip.copy(_normalize_url(url))
+        pyautogui.hotkey("ctrl", "v")
+        pyautogui.press("enter")
+    finally:
+        pyperclip.copy(previous)
+    time.sleep(0.5)
+    current = _read_native_url()
+    expected_host = (urlsplit(_normalize_url(url)).hostname or "").casefold().removeprefix("www.")
+    current_host = (urlsplit(current).hostname or "").casefold().removeprefix("www.")
+    expected_path = urlsplit(_normalize_url(url)).path.rstrip("/")
+    current_path = urlsplit(current).path.rstrip("/")
+    if not current_host or current_host != expected_host or (expected_path and current_path != expected_path):
+        return f"Error: Navigation not verified. Current address: {current or 'unavailable'}."
+    return f"Active browser tab address verified: {current}"
 
 def _normalize_url(url: str) -> str:
     """
@@ -940,6 +1004,26 @@ class _BrowserSession:
             return "Tab closed."
         return "No active tab to close."
 
+    async def close_tabs_matching(self, domain: str) -> str:
+        page = await self._get_page()
+        host = (urlsplit(_normalize_url(domain)).hostname or "").casefold().removeprefix("www.")
+        if not host:
+            return "Error: A valid domain is required to close matching tabs."
+        pages = list(page.context.pages)
+        matched = [tab for tab in pages if (urlsplit(tab.url).hostname or "").casefold() in (host, "www." + host)]
+        if not matched:
+            return f"No open tabs matched {host}."
+        if len(matched) == len(pages):
+            self._page = await page.context.new_page()
+        elif self._page in matched:
+            self._page = next(tab for tab in pages if tab not in matched)
+        for tab in matched:
+            await tab.close()
+        remaining = [tab for tab in page.context.pages if not tab.is_closed()]
+        if not remaining:
+            return "Error: Could not preserve a nonmatching tab; inspect browser state."
+        return f"Closed {len(matched)} tab(s) on {host}; {len(remaining)} tab(s) remain open."
+
     async def screenshot(self, path: str = None) -> str:
         page = await self._get_page()
         try:
@@ -1060,6 +1144,20 @@ class _SessionRegistry:
 
 
 _registry = _SessionRegistry()
+_scroll_lock = threading.Lock()
+_scroll_stop = threading.Event()
+_scroll_thread: threading.Thread | None = None
+
+
+def _continuous_scroll() -> None:
+    import pyautogui
+    while not _scroll_stop.wait(0.35):
+        if not _native_browser_window():
+            continue
+        try:
+            pyautogui.scroll(-3)
+        except Exception:
+            break
 
 def browser_control(
     parameters:    dict = None,
@@ -1083,7 +1181,28 @@ def browser_control(
         _log(player, result)
         return result
 
+    if action == "stop_scroll":
+        _scroll_stop.set()
+        return "Continuous browser scrolling stopped."
+
+    if action == "start_scroll":
+        if not _native_browser_window():
+            return "Error: Focus a browser tab before starting continuous scroll."
+        global _scroll_thread
+        with _scroll_lock:
+            if _scroll_thread and _scroll_thread.is_alive():
+                return "Continuous browser scrolling is already running."
+            _scroll_stop.clear()
+            _scroll_thread = threading.Thread(target=_continuous_scroll, daemon=True,
+                                              name="BrowserContinuousScroll")
+            _scroll_thread.start()
+        return "Continuous browser scrolling started; say stop to stop it."
+
     if action == "close_all":
+        if params.get("scope") != "all_browser_windows":
+            return "Error: Closing every browser window requires scope='all_browser_windows'. Site tabs use close_tabs."
+        if params.get("domain") or params.get("url"):
+            return "Error: close_all closes browser windows. Use close_tabs with domain for site tabs."
         result = _registry.close_all()
         # Also close native browser window if any was open
         try:
@@ -1096,6 +1215,10 @@ def browser_control(
         return result
 
     if action == "close":
+        if params.get("scope") != "browser_window":
+            return "Error: Closing a browser window requires scope='browser_window'. Site tabs use close_tabs."
+        if params.get("domain") or params.get("url"):
+            return "Error: close closes a browser window. Use close_tabs with domain for site tabs."
         target = browser or _registry._active_browser
         result = _registry.close_one(target) if (target and _registry.has(target)) else ""
         try:
@@ -1109,21 +1232,56 @@ def browser_control(
         _log(player, result)
         return result
 
-    # ── Navigation is ALWAYS native ──────────────────────────────────────────
-    # go_to / search / new_tab open the site in the user's own browser —
-    # their own profile, logged-in accounts and start page; exactly as if the
-    # user had opened it themselves. A controlled window with about:blank never
-    # opens here. The only exception: if an automation flow is already running,
-    # navigation continues in that window (so multi-step tasks aren't split).
-    if action in ("go_to", "search", "new_tab"):
+    if action == "close_tabs":
+        domain = str(params.get("domain") or "").strip()
+        if not domain:
+            return "Error: Provide the exact domain whose tabs should close."
+        if not _registry.has(browser):
+            return ("Error: Tabs in this native browser cannot be enumerated safely. "
+                    "No tabs or windows were closed.")
+        try:
+            sess = _registry.get(browser)
+            result = sess.run(sess.close_tabs_matching(domain))
+        except Exception as exc:
+            result = f"Error: Could not close matching tabs safely: {exc}"
+        _log(player, result)
+        return result
+
+    if action == "new_tab":
+        active = _native_browser_window()
+        if active:
+            try:
+                import pyautogui
+                url = str(params.get("url") or "").strip()
+                if url and _incomplete_linkedin_url(url):
+                    return "Error: Incomplete LinkedIn URL; no new tab was opened."
+                pyautogui.hotkey("ctrl", "t")
+                if url:
+                    navigation = _navigate_native_url(url)
+                    if navigation.startswith("Error:"):
+                        return f"Error: New tab command sent, but {navigation[7:]}"
+                return f"Sent new-tab shortcut to active browser '{active.title}'."
+            except Exception as exc:
+                return f"Error: New-tab outcome uncertain: {exc}. Inspect browser before retrying."
         if _registry.has(browser):
+            try:
+                sess = _registry.get(browser)
+                return sess.run(sess.new_tab(params.get("url", "")))
+            except Exception as exc:
+                return f"Error: Could not open tab in connected browser: {exc}"
+        return "Error: No active browser tab. Focus an existing browser window before opening a new tab."
+
+    # Navigation reuses the foreground native tab. Without one, an explicitly
+    # requested URL may be opened by the OS or in an existing connected session.
+    if action in ("go_to", "search"):
+        if action == "go_to" and _incomplete_linkedin_url(str(params.get("url") or "")):
+            return "Error: Incomplete LinkedIn URL. Use smart_click on the visible navigation item or a full URL."
+        if _registry.has(browser) and not _native_browser_window():
             sess = _registry.get(browser)
             try:
                 if action == "search":
                     result = sess.run(sess.search(params.get("query", ""),
                                                   params.get("engine", "google")))
-                elif action == "new_tab":
-                    result = sess.run(sess.new_tab(params.get("url", "")))
                 else:
                     result = sess.run(sess.go_to(params.get("url", "")))
             except concurrent.futures.TimeoutError:
@@ -1140,39 +1298,17 @@ def browser_control(
         else:
             nav_url = params.get("url", "").strip()
 
-        # If user did NOT explicitly request a new tab, check if a browser window is already open.
-        # If open, navigate in the CURRENT ACTIVE TAB via address bar (Ctrl + L) to avoid cluttering new tabs!
-        new_tab = bool(params.get("new_tab", False))
-        if nav_url and not new_tab and action == "go_to":
+        if action == "go_to" and nav_url and not params.get("new_tab") and _native_browser_window():
             try:
-                import pyautogui
-                from actions.computer_control import _focus_window, _active_window
-                cur_title = _active_window().lower()
-                browser_kw = ("chrome", "edge", "firefox", "brave", "opera", "linkedin", "youtube", "browser")
-                is_browser_active = any(k in cur_title for k in browser_kw)
-                if not is_browser_active:
-                    for b in ("Google Chrome", "Chrome", "Microsoft Edge", "Edge", "Brave", "Firefox", "Opera"):
-                        if "Focused window:" in _focus_window(b):
-                            is_browser_active = True
-                            time.sleep(0.15)
-                            break
-                if is_browser_active:
-                    import pyperclip
-                    pyautogui.hotkey("ctrl", "l")
-                    time.sleep(0.1)
-                    pyperclip.copy(nav_url)
-                    time.sleep(0.05)
-                    pyautogui.hotkey("ctrl", "v")
-                    time.sleep(0.05)
-                    pyautogui.press("enter")
-                    time.sleep(0.15)
-                    result = f"Navigated in active tab: {nav_url}"
-                    _registry.note_native_url(_normalize_url(nav_url))
-                    _log(player, result)
-                    return result
-            except Exception as e:
-                print(f"[Browser] In-tab navigation fallback to native open: {e}")
+                result = _navigate_native_url(nav_url)
+                if not result.startswith("Error:"):
+                    _registry.note_native_url(result.partition(": ")[2])
+                _log(player, result)
+                return result
+            except Exception as exc:
+                return f"Error: In-tab navigation outcome uncertain: {exc}. No extra browser opened."
 
+        # No browser tab is foreground: ask the OS to open the requested URL.
         result = _open_native(nav_url, browser)
         if result.startswith("Opened") and nav_url:
             _registry.note_native_url(_normalize_url(nav_url))
@@ -1268,7 +1404,8 @@ def browser_control(
                     if action == "scroll":
                         direction = params.get("direction", "down").lower().strip()
                         amount    = int(params.get("amount", 500))
-                        clicks    = -amount if direction == "down" else amount
+                        clicks    = max(1, min(10, round(abs(amount) / 120)))
+                        clicks    = -clicks if direction == "down" else clicks
                         # Ensure mouse cursor is in the viewport center, not on the titlebar or minimize icon
                         sw, sh = pyautogui.size()
                         cx, cy = pyautogui.position()
@@ -1506,13 +1643,13 @@ def _log(player, text: str):
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "browser_control",
-    "description": "Controls web browsers and active web pages. Use for: opening websites, navigating, searching, scrolling, clicking elements, filling forms, YouTube playback control (speed, play/pause, fullscreen, theater mode, captions), and keyboard shortcuts. For user profiles (e.g. GitHub profile), use action='go_to' with the URL directly (e.g. 'https://github.com/Mahbub0001'). Navigating, scrolling, and clicking seamlessly act on the user's active browser without launching separate guest sessions.",
+    "description": "Controls the active browser. For a visible page navigation item use smart_click with its label, not an invented partial URL. go_to needs a complete URL and uses the current foreground tab. new_tab sends Ctrl+T to the foreground browser and never launches Chrome. start_scroll continues until stop_scroll. close_tabs needs a domain and closes only matching tabs when they can be enumerated safely; never use close or close_all for site tabs.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | hotkey | youtube_speed | youtube_control | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
+                "description": "go_to | search | click | type | scroll | start_scroll | stop_scroll | close_tabs | fill_form | smart_click | smart_type | get_text | get_url | press | hotkey | youtube_speed | youtube_control | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
             },
             "browser": {
                 "type": "STRING",
@@ -1522,6 +1659,8 @@ TOOL = {
                 "type": "STRING",
                 "description": "URL for go_to / new_tab action"
             },
+            "domain": {"type": "STRING", "description": "Exact website domain for close_tabs, e.g. linkedin.com"},
+            "scope": {"type": "STRING", "description": "Required only for closing entire windows: browser_window for close, all_browser_windows for close_all. Never use for site tabs."},
             "query": {
                 "type": "STRING",
                 "description": "Search query for search action"
