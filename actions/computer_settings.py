@@ -880,6 +880,10 @@ def computer_settings(
         scroll_down(int(value or 500))
         return "Scrolled down."
 
+    if action == "close_tab":
+        return ("Error: Use browser_control for tabs. For a named site use "
+                "action='close_tabs' with its exact domain; this shortcut could close the wrong tab.")
+
     func = ACTION_MAP.get(action)
     if not func:
         return _suggest(raw_action or description)
@@ -946,7 +950,7 @@ TOOL = {
                     "pause_video | close_app | close_window | full_screen | "
                     "minimize | maximize | snap_left | snap_right | "
                     "switch_window | show_desktop | task_manager | focus_search | "
-                    "refresh_page | close_tab | new_tab | next_tab | prev_tab | "
+                    "refresh_page | new_tab | next_tab | prev_tab | "
                     "go_back | go_forward | zoom_in | zoom_out | zoom_reset | "
                     "find_on_page | scroll_up | scroll_down | scroll_top | "
                     "scroll_bottom | page_up | page_down | copy | paste | cut | "

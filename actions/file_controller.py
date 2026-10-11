@@ -3,6 +3,7 @@ import re
 import shutil
 import platform
 import subprocess
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -330,7 +331,44 @@ def _find_vscode_executable() -> str | None:
             cand = Path(pf) / "Microsoft VS Code" / "Code.exe"
             if cand.exists():
                 return str(cand)
-    return which_code
+    return which_code if _OS != "Windows" or (which_code and which_code.lower().endswith(".exe")) else None
+
+
+def _vscode_shows_folder(folder: Path) -> bool:
+    """Read the visible Code window title after opening a workspace."""
+    if _OS != "Windows":
+        return False
+    try:
+        import win32gui
+        found = []
+        def collect(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).casefold()
+                if folder.name.casefold() in title and "visual studio code" in title:
+                    found.append(title)
+        win32gui.EnumWindows(collect, None)
+        return bool(found)
+    except ImportError:
+        return False
+
+
+def _open_folder_in_vscode(folder: Path) -> str:
+    executable = _find_vscode_executable()
+    if not executable:
+        return "Error: Visual Studio Code executable was not found."
+    try:
+        subprocess.Popen([executable, "--reuse-window", str(folder.resolve())],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return f"Error: Could not launch Visual Studio Code: {exc}"
+    for _ in range(20):
+        if _vscode_shows_folder(folder):
+            from core.tool_result import VerifiedResult
+            return VerifiedResult(f"Verified {folder.resolve()} open in Visual Studio Code.",
+                                  {"folder": str(folder.resolve()), "window": "Visual Studio Code"})
+        time.sleep(0.25)
+    return (f"Error: Sent {folder.resolve()} to Visual Studio Code, but could not verify "
+            "the folder in a visible Code window. Inspect the editor before retrying.")
 
 
 def _format_size(b: int) -> str:
@@ -383,7 +421,7 @@ def list_files(path: str = "desktop", show_hidden: bool = False) -> str:
         return f"Error listing files: {e}"
 
 
-def open_folder(path: str = "desktop", name: str = "") -> str:
+def open_folder(path: str = "desktop", name: str = "", with_app: str = "") -> str:
     try:
         base = _resolve_path(path)
         target = (base / name) if name else base
@@ -404,6 +442,12 @@ def open_folder(path: str = "desktop", name: str = "") -> str:
 
         if not target.is_dir():
             target = target.parent
+
+        app = with_app.strip().casefold()
+        if app in {"vscode", "vs code", "visual studio code", "code"}:
+            return _open_folder_in_vscode(target)
+        if app and app not in {"explorer", "file explorer", "finder", "files"}:
+            return f"Error: Opening folders with '{with_app}' is not supported."
 
         if _OS == "Windows":
             os.startfile(str(target.resolve()))
@@ -1019,7 +1063,7 @@ def file_controller(
             return list_files(path)
 
         elif action in ("open_folder", "open_dir", "open_directory", "show_in_folder", "open"):
-            return open_folder(path, name=name)
+            return open_folder(path, name=name, with_app=params.get("with_app") or params.get("app") or "")
 
         elif action in ("open_file", "launch_file"):
             with_app = params.get("with_app") or params.get("app") or params.get("editor", "")
@@ -1086,7 +1130,7 @@ def file_controller(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "file_controller",
-    "description": "Manages and opens files and folders: open_folder (opens in Windows File Explorer GUI), open_file (opens file in default app or specified app like vscode, notepad, chrome), list, create_file, create_folder, delete, move, copy, rename, read, write, find, disk usage.",
+    "description": "Manages files and folders. open_folder with_app='vscode' opens the directory as a VS Code workspace and verifies its window; without with_app opens File Explorer. open_file opens a file in the default or specified app.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -1104,7 +1148,7 @@ TOOL = {
             },
             "with_app": {
                 "type": "STRING",
-                "description": "Optional application to open the file with (e.g. 'vscode', 'notepad', 'chrome', 'edge')"
+                "description": "For open_folder use 'vscode' to open that folder in VS Code. For open_file use 'vscode', 'notepad', 'chrome', or 'edge'."
             },
             "app": {
                 "type": "STRING",

@@ -1247,6 +1247,12 @@ def browser_control(
         _log(player, result)
         return result
 
+    if action == "close_tab" and params.get("domain"):
+        # A named site must never be approximated by closing whichever tab is
+        # foreground. Native browser enumeration is unavailable here.
+        return browser_control({"action": "close_tabs", "domain": params["domain"],
+                                "browser": browser or ""}, player=player)
+
     if action == "new_tab":
         active = _native_browser_window()
         if active:

@@ -57,6 +57,13 @@ class TestNativeBrowserWorkflow(unittest.TestCase):
         self.assertTrue(result.startswith("Error:"))
         close_window.assert_not_called()
 
+    def test_named_site_cannot_close_unrelated_foreground_tab(self):
+        with patch.object(browser._registry, "has", return_value=False), \
+                patch("pyautogui.hotkey") as hotkey:
+            result = browser.browser_control({"action": "close_tab", "domain": "linkedin.com"})
+        self.assertTrue(result.startswith("Error:"))
+        hotkey.assert_not_called()
+
     def test_window_close_requires_explicit_scope(self):
         with patch("actions.computer_control._close_window") as close_window:
             result = browser.browser_control({"action": "close_all"})
@@ -125,6 +132,13 @@ class TestConnectedBrowserWorkflow(unittest.IsolatedAsyncioTestCase):
 
 
 class TestVolumeWorkflow(unittest.TestCase):
+    def test_settings_cannot_close_unrelated_tab(self):
+        from actions import computer_settings as settings
+        with patch.object(settings, "close_tab") as close:
+            result = settings.computer_settings({"action": "close_tab"})
+        self.assertTrue(result.startswith("Error:"))
+        close.assert_not_called()
+
     def test_current_volume_is_available_as_tool_action(self):
         from actions import computer_settings as settings
         with patch.object(settings, "_PYAUTOGUI", True), patch.object(settings, "volume_get", return_value=47):
