@@ -32,7 +32,7 @@ _LIVE_ACTIONS = ("elements", "click", "double_click", "type", "press",
                  "state", "wait")
 
 
-def _vision_fallback(app: str, element: str) -> str:
+def _vision_fallback(app: str, element: str, clicks: int = 1) -> str:
     """
     Last resort: find the element by eye (Gemini on a screenshot) and click
     its center. Only reached when UIA has no matching control.
@@ -41,30 +41,18 @@ def _vision_fallback(app: str, element: str) -> str:
         from actions.computer_control import _screen_find, _click
     except Exception:
         return ""
-    # Bring the target window forward first — vision sees the focused app.
-    try:
-        uia.connect(app)
-        time.sleep(0.3)
-    except Exception:
-        pass
+    # _screen_find checks focus itself, including when UIA is unavailable.
     coords = _screen_find(f"the UI element '{element}'", window_title=app)
     if not coords:
         return ""
-    _click(coords[0], coords[1], smooth=True)
+    _click(coords[0], coords[1], smooth=True, clicks=clicks)
     return f"Clicked '{element}' at {coords} using visual element search."
 
 
 def _launch(app: str) -> str:
     from actions.open_app import open_app
     result = open_app({"app_name": app})
-    # Give the window a moment to appear, then confirm what we got.
-    if uia.available():
-        try:
-            info = uia.window_info(app)
-            return f"Opened {info.title}. {result}"
-        except Exception:
-            pass
-    return str(result)
+    return result
 
 
 def app_control(parameters: dict, response=None, player=None,
@@ -122,6 +110,13 @@ def app_control(parameters: dict, response=None, player=None,
                 return "Error: 'app' is required for launch (e.g. 'Zoom', 'Chrome', 'Notepad')."
             return _launch(app)
 
+        if action in ("close", "hover", "verify_state"):
+            from actions.computer_control import computer_control
+            return computer_control({"action": "close_window" if action == "close" else action,
+                                     "title": app, "description": element or intent,
+                                     "expectation": parameters.get("expectation", ""),
+                                     "seconds": parameters.get("seconds", .8)})
+
         if action == "windows":
             wins = uia.list_windows()
             if not wins:
@@ -131,7 +126,7 @@ def app_control(parameters: dict, response=None, player=None,
         if not uia.available():
             # No UIA at all — degrade to vision for click, honest error else.
             if action in ("click", "double_click"):
-                out = _vision_fallback(app, element or intent or "the button to click")
+                out = _vision_fallback(app, element or intent or "the button to click", clicks=2 if action == "double_click" else 1)
                 return out or "UI automation unavailable and visual search failed."
             return ("UI automation unavailable on this system — "
                     "use computer_control screen_find/screen_click instead.")
@@ -164,21 +159,17 @@ def app_control(parameters: dict, response=None, player=None,
                     return uia.click(app, target_el, timeout=timeout)
                 return uia.double_click(app, target_el, timeout=timeout)
             except RuntimeError as e:
-                # First try universal domain operator fallback
+                # Resolve a missing target once. Never replay an uncertain mutation.
                 try:
                     from core import universal_operator
                     res = universal_operator.execute_smart_operation(
                         intent=target_el, app=app, element=target_el, action_type=action
                     )
-                    if res and not res.startswith("Error"):
+                    if res:
                         return res
                 except Exception:
                     pass
 
-                # If still not found, try visual grounding with Gemini Vision
-                out = _vision_fallback(app, target_el)
-                if out:
-                    return out
                 return str(e)
 
         if action == "type":
@@ -205,12 +196,13 @@ def app_control(parameters: dict, response=None, player=None,
                     pass
                 try:
                     from actions.computer_control import _screen_find
-                    coords = _screen_find(f"the text input '{element}'")
+                    coords = _screen_find(f"the text input '{element}'", window_title=app)
                 except Exception:
                     coords = None
                 if coords:
                     import pyautogui
-                    pyautogui.click(coords[0], coords[1])
+                    from actions.computer_control import _click
+                    _click(coords[0], coords[1])
                     if parameters.get("clear"):
                         pyautogui.hotkey("ctrl", "a")
                     if text.isascii():
@@ -237,7 +229,7 @@ def app_control(parameters: dict, response=None, player=None,
     except RuntimeError as e:
         return str(e)
     except Exception as e:
-        return f"app_control failed: {e}"
+        return f"Error: app_control failed: {e}"
 
 
 TOOL = {
@@ -249,7 +241,9 @@ TOOL = {
         "launch (open app and verify window), windows (list open windows), "
         "elements (list visible controls in app), state (active app + top elements), "
         "click / double_click (press named element with multi-tier fallback), "
-        "type (write text into field), press (send key), wait (block until element appears). "
+        "type (write text into field), press (send key), wait (block until element appears), "
+        "hover (reveal a menu without clicking), close (verify window closure), "
+        "verify_state (observe an exact resulting state without another click). "
         "If 'app' is omitted, it automatically detects and operates the active foreground window!"),
     "parameters": {
         "type": "OBJECT",
@@ -257,7 +251,7 @@ TOOL = {
             "action": {
                 "type": "STRING",
                 "enum": ["operate", "launch", "windows", "elements", "state", "click",
-                         "double_click", "type", "press", "wait"],
+                         "double_click", "type", "press", "wait", "close", "hover", "verify_state"],
                 "description": "What to do.",
             },
             "app": {
@@ -276,6 +270,8 @@ TOOL = {
             "key": {"type": "STRING", "description": "Key name, e.g. 'enter', 'esc' (press action)."},
             "clear": {"type": "BOOLEAN", "description": "Select existing text first (type action)."},
             "timeout": {"type": "NUMBER", "description": "Seconds to wait for the element (default 0)."},
+            "expectation": {"type": "STRING", "description": "Exact visible result to check with verify_state, including the target post or control."},
+            "seconds": {"type": "NUMBER", "description": "Hover dwell time, 0.2 to 2 seconds."},
         },
         "required": ["action"],
     },

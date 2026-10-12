@@ -73,9 +73,11 @@ def _normalize(raw: str) -> str:
     if key in _APP_ALIASES:
         return _APP_ALIASES[key].get(_SYSTEM, raw)
 
-    for alias_key, os_map in _APP_ALIASES.items():
-        if alias_key in key or key in alias_key:
-            return os_map.get(_SYSTEM, raw)
+    canonical = {"microsoft word": "word", "microsoft excel": "excel",
+                 "microsoft powerpoint": "powerpoint", "microsoft edge": "edge",
+                 "windows terminal": "terminal", "vs code": "vscode"}.get(key)
+    if canonical:
+        return _APP_ALIASES[canonical].get(_SYSTEM, raw)
 
     return raw  
 
@@ -312,20 +314,55 @@ _OS_LAUNCHERS = {
 }
 
 
+def _focus_existing_app(app_name: str, normalized: str):
+    """Match the application's process; a browser tab title is not an app."""
+    if _SYSTEM != "Windows":
+        from actions.computer_control import _focus_window
+        result = _focus_window(app_name)
+        return result if result.startswith("Focused window:") else None
+    try:
+        import win32gui as gui
+        import win32process
+        from core.desktop_target import focus
+        from core.tool_result import VerifiedResult
+        expected = Path(normalized).name.casefold().removesuffix(".exe")
+        expected = {"ms-settings:": "systemsettings", "wt": "windowsterminal",
+                    "calc": "calculatorapp"}.get(expected, expected)
+        matches = []
+        def collect(hwnd, _):
+            if not gui.IsWindowVisible(hwnd) or not gui.GetWindowText(hwnd).strip():
+                return
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                process = psutil.Process(pid).name().casefold().removesuffix(".exe")
+                if process == expected:
+                    matches.append(hwnd)
+            except Exception:
+                pass
+        gui.EnumWindows(collect, None)
+        active = gui.GetForegroundWindow()
+        if active in matches:
+            matches = [active]
+        if not matches:
+            return None
+        if len(matches) != 1:
+            return f"Error: Multiple {app_name} windows are open; identify the intended window from list_windows."
+        hwnd = focus(gui.GetWindowText(matches[0]))
+        if hwnd != matches[0]:
+            return f"Error: Could not verify the intended {app_name} window."
+        return VerifiedResult(f"Verified application window: {app_name}.", {"hwnd": hwnd, "app": app_name})
+    except Exception as exc:
+        return f"Error: Could not focus application {app_name}: {exc}"
+
+
 def _verify_launch(app_name: str, normalized: str) -> str:
     """Launching a process or pressing Enter in Start is not completion proof."""
     if _SYSTEM != "Windows":
         return f"Launch requested for {app_name}; the application window has not been verified."
-    from core.desktop_target import focus
-    from core.tool_result import VerifiedResult
-    terms = list(dict.fromkeys([app_name, normalized.removesuffix(".exe")]))
     for _ in range(4):
-        for term in terms:
-            try:
-                hwnd = focus(term)
-                return VerifiedResult(f"Verified application window: {app_name}.", {"hwnd": hwnd, "app": app_name})
-            except Exception:
-                pass
+        result = _focus_existing_app(app_name, normalized)
+        if result and not result.startswith("Error:"):
+            return result
         time.sleep(.3)
     return f"Error: Launch requested for {app_name}, but its window could not be verified. Inspect before retrying."
 
@@ -363,30 +400,9 @@ def open_app(
         from actions.browser_control import browser_control
         return browser_control({"action": "go_to", "url": web_apps[low_clean]}, player=player)
 
-    # Check if app window is already open — if so, bring it to front
-    try:
-        from actions.computer_control import _focus_window
-        search_terms = [app_name, normalized]
-        low = app_name.lower()
-        if "chrome" in low: search_terms.extend(["Google Chrome", "Chrome"])
-        elif "vscode" in low or "visual studio code" in low or low == "code": search_terms.extend(["Visual Studio Code", "Code"])
-        elif "word" in low: search_terms.extend(["Word", "Document"])
-        elif "excel" in low: search_terms.append("Excel")
-        elif "powerpoint" in low: search_terms.append("PowerPoint")
-        elif "spotify" in low: search_terms.append("Spotify")
-        elif "notepad" in low: search_terms.append("Notepad")
-        elif "discord" in low: search_terms.append("Discord")
-        elif "whatsapp" in low: search_terms.append("WhatsApp")
-        elif "telegram" in low: search_terms.append("Telegram")
-        elif "slack" in low: search_terms.append("Slack")
-
-        for term in search_terms:
-            focus_res = _focus_window(term)
-            if "Focused window:" in focus_res:
-                print(f"[open_app] Already open, brought to front: {term}")
-                return f"Switched to {app_name} (brought to front)."
-    except Exception as ex:
-        print(f"[open_app] Window focus check: {ex}")
+    existing = _focus_existing_app(app_name, normalized)
+    if existing:
+        return existing
 
     # Check if request is to open a folder or drive
     try:

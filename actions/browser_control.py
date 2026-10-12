@@ -1027,6 +1027,44 @@ class _BrowserSession:
             return await self.go_to(url)
         return "New tab opened."
 
+    async def hover(self, description: str = "", selector: str = "", seconds: float = .8) -> str:
+        page = await self._get_page()
+        candidates = [page.locator(selector)] if selector else [
+            page.get_by_role("button", name=description, exact=True),
+            page.get_by_role("link", name=description, exact=True),
+            page.get_by_text(description, exact=True)]
+        for loc in candidates:
+            count = await loc.count()
+            if count > 1:
+                return "Error: Hover target is ambiguous; scope it to the intended post or use a unique selector."
+            if count == 1:
+                try:
+                    await loc.hover(timeout=5000)
+                    await asyncio.sleep(max(.2, min(2, float(seconds))))
+                    return "Hovered over the target. Inspect the revealed menu before selecting an item."
+                except Exception as exc:
+                    return f"Error: Hover failed: {exc}."
+        return "Error: Hover target was not found."
+
+    async def verify_state(self, selector: str, attribute: str, expected_value: str) -> str:
+        if not selector or attribute not in ("aria-pressed", "aria-checked", "aria-expanded", "value", "text"):
+            return "Error: Provide a unique selector and a supported state attribute."
+        page = await self._get_page()
+        loc = page.locator(selector)
+        if await loc.count() != 1 or not await loc.is_visible():
+            return "Error: State target is missing, hidden or ambiguous."
+        if attribute == "value":
+            actual = await loc.input_value()
+        elif attribute == "text":
+            actual = (await loc.inner_text()).strip()
+        else:
+            actual = await loc.get_attribute(attribute)
+        if actual != expected_value:
+            return f"Error: Expected state is not present; {attribute} read-back was {actual!r}."
+        from core.tool_result import VerifiedResult
+        return VerifiedResult(f"Verified element state: {attribute}={actual!r}.",
+                              {"selector": selector, "attribute": attribute, "value_matches": True})
+
     async def close_tab(self) -> str:
         page = self._page
         if page and not page.is_closed():
@@ -1374,6 +1412,36 @@ def browser_control(
         _log(player, result)
         return result
 
+    if action == "verify_state":
+        if _native_browser_window():
+            from actions.computer_control import computer_control as _cc
+            return _cc({"action": "verify_state", "expectation": params.get("expectation", "")})
+        if _registry.has(browser):
+            sess = _registry.get(browser)
+            try:
+                return sess.run(sess.verify_state(params.get("selector", ""), params.get("attribute", ""),
+                                                  str(params.get("expected_value", ""))))
+            except Exception as exc:
+                return f"Error: State verification failed: {exc}."
+        return "Error: Focus the intended browser before verifying its state."
+
+    if action == "hover":
+        description = params.get("description") or params.get("text") or ""
+        if not description and not params.get("selector"):
+            return "Error: A unique visible target description or selector is required for hover."
+        if _native_browser_window():
+            if params.get("selector"):
+                return "Error: Native browser hover needs a visible description; CSS selectors require a DOM session."
+            from actions.computer_control import computer_control as _cc
+            return _cc({"action": "hover", "description": description, "seconds": params.get("seconds", .8)})
+        if _registry.has(browser):
+            sess = _registry.get(browser)
+            try:
+                return sess.run(sess.hover(description, params.get("selector", ""), params.get("seconds", .8)))
+            except Exception as exc:
+                return f"Error: Browser hover failed: {exc}."
+        return "Error: Focus the intended browser before hovering."
+
     # ── Simple desktop/window navigation fallback ────────────────────────────
     # If the user opened a website in their own native browser (or is looking at
     # an existing browser window) and asks to scroll, press a key, or refresh,
@@ -1388,11 +1456,15 @@ def browser_control(
             try:
                 from core import uia
                 info, controls = uia.list_controls(active.title, limit=80)
-                return f"Visible browser UI in {info.title}:\n" + "\n".join(c.name for c in controls)
+                return f"Visible browser UI in {info.title}:\n" + "\n".join(
+                    f"{c.name} ({c.control_type}) at {c.center}" for c in controls)
             except Exception as exc:
                 return f"Error: Browser UI could not be inspected: {exc}"
         if action == "get_url":
-            return "Error: Current URL is unavailable without a connected DOM session; inspect the visible address bar."
+            try:
+                return "Active browser address: " + _read_native_url()
+            except Exception as exc:
+                return f"Error: Current address could not be read: {exc}"
         if params.get("selector") and action in ("click", "type", "smart_click", "smart_type"):
             return "Error: CSS selectors need a connected DOM session. For the current native browser use a visible element description."
         # 1. Profile / direct navigation check
@@ -1695,7 +1767,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "go_to | search | click | type | scroll | start_scroll | stop_scroll | close_tabs | fill_form | smart_click | smart_type | get_text | get_url | press | hotkey | youtube_speed | youtube_control | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
+                "description": "go_to | search | click | hover | verify_state | type | scroll | start_scroll | stop_scroll | close_tabs | fill_form | smart_click | smart_type | get_text | get_url | press | hotkey | youtube_speed | youtube_control | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
             },
             "browser": {
                 "type": "STRING",
@@ -1751,6 +1823,10 @@ TOOL = {
                 "type": "BOOLEAN",
                 "description": "Open in private/incognito mode"
             },
+            "seconds": {"type": "NUMBER", "description": "Hover dwell time, 0.2 to 2 seconds."},
+            "expectation": {"type": "STRING", "description": "Exact visible expected state in a native browser, including its target post or control."},
+            "attribute": {"type": "STRING", "description": "DOM state read-back: aria-pressed | aria-checked | aria-expanded | value | text."},
+            "expected_value": {"type": "STRING", "description": "Exact expected attribute value for DOM verify_state."},
             "clear_first": {
                 "type": "BOOLEAN",
                 "description": "Clear field before typing (default: true)"

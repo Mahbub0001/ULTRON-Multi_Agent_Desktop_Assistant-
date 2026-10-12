@@ -54,3 +54,21 @@ def window_state(action, title=""):
         return f"Error: Could not verify window {action}."
     except Exception as exc:
         return f"Error: Window {action} failed: {exc}"
+
+
+def close_window(title=""):
+    """Request normal closure of one identified window and read back its state."""
+    import win32gui as gui
+    import win32con as con
+    try:
+        hwnd = focus(title)
+        name = gui.GetWindowText(hwnd)
+        gui.PostMessage(hwnd, con.WM_CLOSE, 0, 0)
+        for _ in range(16):
+            if not gui.IsWindow(hwnd) or not gui.IsWindowVisible(hwnd):
+                return VerifiedResult(f"Verified window closed: {name}", {"hwnd": hwnd, "closed": True})
+            time.sleep(.1)
+        return (f"Error: Close requested for '{name}', but the window remains open. "
+                "Check for a save prompt or confirmation dialog; do not force-close or repeat automatically.")
+    except Exception as exc:
+        return f"Error: Window close failed: {exc}"

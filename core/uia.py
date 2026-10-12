@@ -227,11 +227,11 @@ def list_controls(app: str, include_hidden: bool = False,
     if not include_hidden:
         controls = [c for c in controls if c.visible]
 
-    # De-duplicate by name, keep the first (outermost) of each.
-    seen: set[str] = set()
+    # Preserve repeated buttons on different posts; their locations distinguish them.
+    seen: set[tuple] = set()
     unique: list[Control] = []
     for c in controls:
-        key = _norm(c.name)
+        key = (_norm(c.name), c.control_type, c.rect)
         if key in seen:
             continue
         seen.add(key)
@@ -252,6 +252,9 @@ def find(app: str, element: str, timeout: float = 0.0) -> Control:
     Find a named element inside the app's window. Raises RuntimeError when
     nothing matches — callers turn that into guidance for the next step.
     """
+    if len(element.split()) > 6 or _tokens(element).intersection(
+            {"post", "below", "above", "containing", "inside", "within", "under", "beside"}):
+        raise RuntimeError("Context-qualified target requires visual grounding, not a loose label match")
     w = connect(app)
     deadline = time.time() + max(0.0, timeout)
     last: list[Control] = []
@@ -260,6 +263,9 @@ def find(app: str, element: str, timeout: float = 0.0) -> Control:
         last = controls
         chosen = best_match([c.name for c in controls], element, min_score=0.65)
         if chosen:
+            alternative_names = {c.name for c in controls if c.name != chosen and score(c.name, element) >= score(chosen, element) - .08}
+            if alternative_names:
+                raise RuntimeError(f"Ambiguous target '{element}': multiple labels match similarly")
             matches = [c for c in controls if c.name == chosen]
             locations = {c.rect for c in matches}
             if len(locations) > 1:

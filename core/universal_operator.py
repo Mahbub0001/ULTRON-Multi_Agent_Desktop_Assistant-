@@ -338,6 +338,11 @@ def execute_smart_operation(
 
     category = ctx.app_category
     goal_desc = element or intent or text or "action"
+    if action_type not in ("click", "double_click", "type", "write", "hover"):
+        return f"Error: Unsupported action type '{action_type}'."
+    if action_type == "hover":
+        from actions.computer_control import _hover
+        return _hover(goal_desc, window_title=ctx.title)
 
     # Step 2: Intent Matching
     matched_intent = _match_intent(category, intent or element)
@@ -367,11 +372,15 @@ def execute_smart_operation(
                         res = uia.type_text(ctx.title, target_name, text, clear=True, timeout=0.3)
                         if not res:
                             raise RuntimeError("UIA typing returned no result")
+                        if res.startswith("Error:"):
+                            return res
                         return f"{res} Outcome verification is still required."
                     else:
                         res = (uia.double_click if action_type == "double_click" else uia.click)(ctx.title, target_name, timeout=0.3)
                         if not res:
                             raise RuntimeError("UIA click returned no result")
+                        if res.startswith("Error:"):
+                            return res
                         time.sleep(0.2)
                         # Verify
                         new_ctx = get_active_window()

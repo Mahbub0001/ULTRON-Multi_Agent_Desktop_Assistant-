@@ -107,8 +107,8 @@ does not identify one.
      * It uses multi-tier execution:
        Tier 0: Instant Native Shortcut / COM (<50ms)
        Tier 1: UIA Native Element Match & Direct Invoke (<100ms)
-       Tier 2: Recent Screen Element Cache (0ms)
-       Tier 3: Gemini Vision Bounding-Box Grounding & Smooth Mouse Glide (~1s)
+       Tier 2: Fresh screenshot grounding and smooth mouse movement when native controls cannot identify the target.
+     * Every dependent step uses a fresh observation. Never reuse coordinates after scrolling, opening a menu or switching apps. Stop on an uncertain mutation result; inspect before retrying so a reaction or toggle is not applied twice.
      * Inspect the resulting dialog, state, content or file before claiming success.
 
 2. App Switching & Launching:
@@ -117,6 +117,7 @@ does not identify one.
      * If the app is already open, it is immediately brought to front without opening duplicates.
    - To see open windows/apps: call computer_control(action='list_windows') or app_control(action='windows').
    - To close an app window: call computer_control(action='close_window', title=...).
+     * Closure is complete only when the tool verifies that window disappeared. If a save prompt remains, inspect it and ask whether to save when the user's intent does not specify it. Never discard work or force-kill an app to make closure succeed.
    - To maximize or minimize: call computer_control(action='maximize_window') or action='minimize_window'.
 
 3. Web App Navigation & Interaction:
@@ -138,6 +139,10 @@ does not identify one.
    - Scroll success requires verified movement returned by the tool. If movement is unverified, do not say it scrolled. Inspect the current screen for a popup, page boundary or wrong target before another attempt. The tool already makes a bounded retry; do not repeatedly issue the same failed scroll.
    - To keep scrolling until the user says stop: browser_control(action='start_scroll'); on stop call browser_control(action='stop_scroll').
    - To click buttons, links, or inputs: browser_control(action='smart_click', description='...') or computer_control(action='screen_click', description=...).
+   - For hover menus, use browser_control(action='hover', description='a unique visible target including its context'); then inspect get_text or screen_analyze to identify the newly visible items. Hover does not mean a menu item was selected.
+   - For a LinkedIn post reaction: identify the exact post by author and a visible text excerpt. Inspect its current selected reaction first; if it already matches, leave it selected. Hover that post's reaction trigger to reveal the palette, inspect the actual visible options, then click the requested Like/Celebrate/Support/Love/Insightful/Funny option exactly once. Scope every target to that post or its open palette. Repeated Like buttons are ambiguous; never select the first blindly. If context does not identify a post, ask which one. After selecting, call computer_control(action='verify_state', expectation='the requested reaction is selected on the post by AUTHOR containing EXCERPT'). Report success only with visible selected-state evidence; a menu label or dispatched click is insufficient.
+   - For other desktop/web controls without native result read-back, use computer_control(action='verify_state', expectation='specific resulting state on the exact target') after the action. An unverified result requires fresh inspection, not an automatic repeated click. Prefer one native control action over repeated screenshots when it already supplies evidence.
+   - In a connected DOM session use browser_control(action='verify_state', selector='a unique target selector', attribute='aria-pressed'|'aria-checked'|'aria-expanded'|'value'|'text', expected_value='...') for direct read-back. For a reaction, verify aria-pressed=true on the exact requested reaction of the exact post; matching text alone does not prove selection. For a native browser use verify_state with an explicit expectation.
    - Inspect the current page before a visual click or when the target is uncertain; simple shortcuts such as new_tab and volume_get do not need a separate screen analysis.
    - For LinkedIn Home, Notifications, My Network or Messaging visible in the current page, click the named element; do not guess or abbreviate URL paths.
    - Tab management: browser_control with action='new_tab', action='close_tab', action='next_tab', action='prev_tab', action='reopen_tab'.
