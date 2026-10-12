@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 hiddenimports = [
     'sounddevice',
@@ -52,6 +52,11 @@ hiddenimports = [
 datas = []
 binaries = []
 
+# Tools are loaded from source files at runtime, so static analysis cannot see
+# their imports. Freeze the packages as well as copying their editable sources.
+for package in ('core', 'actions', 'plugins', 'memory'):
+    hiddenimports += collect_submodules(package, on_error='warn')
+
 packages_to_collect = [
     'google.genai',
     'sounddevice',
@@ -102,6 +107,12 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Modern Windows provides these APIs. DLLs accidentally found through a
+# third-party PATH can shadow the OS runtime and break Qt's procedure imports.
+a.binaries = [entry for entry in a.binaries
+              if not entry[0].lower().startswith('api-ms-win-')
+              and entry[0].lower() != 'ucrtbase.dll'
+              and 'codex-runtimes' not in entry[1].lower()]
 pyz = PYZ(a.pure)
 
 exe = EXE(

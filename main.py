@@ -44,6 +44,15 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+# Validate a built package without opening the UI, microphone or a live session.
+if __name__ == "__main__" and "--check-bundle" in sys.argv:
+    from core.bundle_check import check_bundle
+    index = sys.argv.index("--check-bundle")
+    if len(sys.argv) <= index + 1:
+        raise SystemExit("--check-bundle requires a report file path")
+    bundle_base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+    raise SystemExit(check_bundle(bundle_base, sys.argv[index + 1]))
+
 import sounddevice as sd
 import numpy as np
 from google import genai

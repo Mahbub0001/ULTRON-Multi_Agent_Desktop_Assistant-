@@ -11,9 +11,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DIST_APP = ROOT / "dist" / "ULTRON"
 
-def setup_bundle():
+def setup_bundle(destination=None):
+    global DIST_APP
+    if destination is not None:
+        DIST_APP = Path(destination).resolve()
+        if not DIST_APP.is_relative_to(ROOT):
+            raise ValueError("Bundle destination must be inside the project workspace")
     print(f"[*] Preparing standalone bundle at: {DIST_APP}")
     assert DIST_APP.exists(), f"Directory {DIST_APP} does not exist. Run PyInstaller first."
+
+    internal = DIST_APP / "_internal"
+    quarantine = DIST_APP.parent / (DIST_APP.name + "-dll-quarantine")
+    for dll in internal.glob("*.dll"):
+        if dll.name.lower().startswith("api-ms-win-") or dll.name.lower() in ("ucrtbase.dll", "icuuc.dll", "icudt78.dll"):
+            quarantine.mkdir(exist_ok=True)
+            shutil.copy2(dll, quarantine / dll.name)
+            dll.unlink()
+    print("  [+] Windows API runtime uses the system DLLs")
 
     # 1. Core directory
     core_dest = DIST_APP / "core"
@@ -22,6 +36,11 @@ def setup_bundle():
         src = ROOT / "core" / f
         if src.exists():
             shutil.copy2(src, core_dest / f)
+            if f == "face_model.obj":
+                # Frozen core modules resolve __file__ beneath _internal.
+                frozen_core = DIST_APP / "_internal" / "core"
+                frozen_core.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, frozen_core / f)
             print(f"  [+] Copied core/{f}")
         else:
             print(f"  [!] Warning: core/{f} missing")
@@ -100,4 +119,7 @@ def setup_bundle():
     print("\n[SUCCESS] Standalone bundle prepared successfully at dist/ULTRON/")
 
 if __name__ == "__main__":
-    setup_bundle()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--destination", type=Path)
+    setup_bundle(parser.parse_args().destination)

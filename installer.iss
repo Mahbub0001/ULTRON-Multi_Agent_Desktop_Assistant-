@@ -2,7 +2,7 @@
 ; Inno Setup 6 Script
 
 #define MyAppName "ULTRON"
-#define MyAppVersion "1.59.0"
+#define MyAppVersion "1.59.1"
 #define MyAppPublisher "Nibir"
 #define MyAppExeName "ULTRON.exe"
 
@@ -31,7 +31,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "dist\ULTRON\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "dist\ULTRON\*"; DestDir: "{app}"; Excludes: "config\api_keys.json,config\contacts.json,config\local_calendar_events.json,memory\*.json,data\*"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "dist\ULTRON\config\api_keys.json"; DestDir: "{app}\config"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "dist\ULTRON\config\contacts.json"; DestDir: "{app}\config"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "dist\ULTRON\config\local_calendar_events.json"; DestDir: "{app}\config"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "dist\ULTRON\memory\*.json"; DestDir: "{app}\memory"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\config\jarvis.ico"
@@ -44,6 +48,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [Code]
 var
   UserNamePage: TInputQueryWizardPage;
+  ExistingConfig: Boolean;
 
 procedure InitializeWizard;
 begin
@@ -65,6 +70,9 @@ var
   I: Integer;
   Line: String;
 begin
+  if CurStep = ssInstall then
+    ExistingConfig := FileExists(ExpandConstant('{app}\config\api_keys.json'));
+
   if CurStep = ssPostInstall then
   begin
     UserName := Trim(UserNamePage.Values[0]);
@@ -75,7 +83,7 @@ begin
     StringChangeEx(UserName, '\', '', True);
 
     ConfigFile := ExpandConstant('{app}\config\api_keys.json');
-    if FileExists(ConfigFile) then
+    if (not ExistingConfig) and FileExists(ConfigFile) then
     begin
       if LoadStringsFromFile(ConfigFile, ConfigLines) then
       begin
