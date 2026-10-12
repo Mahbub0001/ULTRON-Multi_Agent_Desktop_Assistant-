@@ -13,7 +13,7 @@ import time
 import webbrowser
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote_plus
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     try:
@@ -82,15 +82,26 @@ def _navigate_native_url(url: str) -> str:
         pyautogui.press("enter")
     finally:
         pyperclip.copy(previous)
-    time.sleep(0.5)
-    current = _read_native_url()
+    return _verify_native_url(url)
+
+
+def _verify_native_url(url: str) -> str:
+    """Bounded read-back; a launch request alone is not navigation evidence."""
     expected_host = (urlsplit(_normalize_url(url)).hostname or "").casefold().removeprefix("www.")
-    current_host = (urlsplit(current).hostname or "").casefold().removeprefix("www.")
     expected_path = urlsplit(_normalize_url(url)).path.rstrip("/")
-    current_path = urlsplit(current).path.rstrip("/")
-    if not current_host or current_host != expected_host or (expected_path and current_path != expected_path):
-        return f"Error: Navigation not verified. Current address: {current or 'unavailable'}."
-    return f"Active browser tab address verified: {current}"
+    expected_query = urlsplit(_normalize_url(url)).query
+    current = ""
+    for _ in range(8):
+        time.sleep(.35)
+        if not _native_browser_window():
+            continue
+        current = _read_native_url()
+        parsed = urlsplit(current)
+        host = (parsed.hostname or "").casefold().removeprefix("www.")
+        if host == expected_host and parsed.path.rstrip("/") == expected_path and parsed.query == expected_query:
+            from core.tool_result import VerifiedResult
+            return VerifiedResult(f"Active browser tab address verified: {current}", {"url": current})
+    return f"Error: Navigation not verified. Current address: {current or 'unavailable'}. Inspect before retrying."
 
 def _normalize_url(url: str) -> str:
     """
@@ -102,6 +113,8 @@ def _normalize_url(url: str) -> str:
     url = url.strip()
     if not url:
         return "about:blank"
+    if urlsplit(url).scheme in ("http", "https"):
+        return url
     
     u_lower = url.lower()
     # Map common web app shorthand
@@ -478,6 +491,7 @@ _SEARCH_ENGINES: dict[str, str] = {
     "bing":       "https://www.bing.com/search?q=",
     "duckduckgo": "https://duckduckgo.com/?q=",
     "yandex":     "https://yandex.com/search/?text=",
+    "youtube":    "https://www.youtube.com/results?search_query=",
 }
 
 _MAC_APP_NAMES: dict[str, str] = {
@@ -794,7 +808,7 @@ class _BrowserSession:
 
     async def search(self, query: str, engine: str = "google") -> str:
         base = _SEARCH_ENGINES.get(engine.lower(), _SEARCH_ENGINES["google"])
-        return await self.go_to(base + query.replace(" ", "+"))
+        return await self.go_to(base + quote_plus(query))
 
     async def click(self, selector: str = None, text: str = None) -> str:
         page = await self._get_page()
@@ -834,9 +848,28 @@ class _BrowserSession:
     async def scroll(self, direction: str = "down", amount: int = 500) -> str:
         page = await self._get_page()
         try:
+            if direction not in ("down", "up"):
+                return "Error: Scroll direction must be down or up."
+            amount = max(120, min(2400, abs(int(amount))))
+            positions = """() => [document.scrollingElement, ...document.querySelectorAll('*')]
+                .filter((e, i, a) => e && a.indexOf(e) === i && e.scrollHeight > e.clientHeight
+                    && e.clientHeight > 100)
+                .map(e => ({top:e.scrollTop, height:e.clientHeight, tag:e.tagName}))"""
+            before = await page.evaluate(positions)
+            url = page.url
+            size = await page.evaluate("() => ({width:innerWidth,height:innerHeight})")
+            await page.mouse.move(size["width"] / 2, size["height"] / 2)
             y = amount if direction == "down" else -amount
             await page.mouse.wheel(0, y)
-            return f"Scrolled {direction}."
+            await asyncio.sleep(.35)
+            after = await page.evaluate(positions)
+            if page.url == url and len(before) == len(after):
+                sign = 1 if direction == "down" else -1
+                if any((b["top"] - a["top"]) * sign > 0 and a["tag"] == b["tag"]
+                       for a, b in zip(before, after)):
+                    from core.tool_result import VerifiedResult
+                    return VerifiedResult(f"Verified page scrolled {direction}.", {"scroll_positions_changed": True})
+            return "Error: Scroll position did not show verified movement; inspect the page or its boundary."
         except Exception as e:
             return f"Scroll error: {e}"
 
@@ -1150,14 +1183,13 @@ _scroll_thread: threading.Thread | None = None
 
 
 def _continuous_scroll() -> None:
-    import pyautogui
+    from core.browser_scroll import scroll_native
     while not _scroll_stop.wait(0.35):
         if not _native_browser_window():
-            continue
-        try:
-            pyautogui.scroll(-3)
-        except Exception:
             break
+        if str(scroll_native("down", 360)).startswith("Error:"):
+            break
+    _scroll_stop.set()
 
 def browser_control(
     parameters:    dict = None,
@@ -1300,11 +1332,11 @@ def browser_control(
         if action == "search":
             base    = _SEARCH_ENGINES.get(params.get("engine", "google").lower(),
                                           _SEARCH_ENGINES["google"])
-            nav_url = base + params.get("query", "").replace(" ", "+")
+            nav_url = base + quote_plus(params.get("query", ""))
         else:
             nav_url = params.get("url", "").strip()
 
-        if action == "go_to" and nav_url and not params.get("new_tab") and _native_browser_window():
+        if nav_url and not params.get("new_tab") and _native_browser_window():
             try:
                 result = _navigate_native_url(nav_url)
                 if not result.startswith("Error:"):
@@ -1317,7 +1349,28 @@ def browser_control(
         # No browser tab is foreground: ask the OS to open the requested URL.
         result = _open_native(nav_url, browser)
         if result.startswith("Opened") and nav_url:
-            _registry.note_native_url(_normalize_url(nav_url))
+            try:
+                result = _verify_native_url(nav_url)
+                if not result.startswith("Error:"):
+                    _registry.note_native_url(_normalize_url(nav_url))
+            except Exception as exc:
+                result = f"Error: Browser launch requested but navigation could not be verified: {exc}."
+        _log(player, result)
+        return result
+
+    if action == "scroll":
+        # A visible native tab takes precedence over an older automation session.
+        if _native_browser_window():
+            from core.browser_scroll import scroll_native
+            result = scroll_native(params.get("direction", "down"), params.get("amount", 500))
+        elif _registry.has(browser):
+            sess = _registry.get(browser)
+            try:
+                result = sess.run(sess.scroll(params.get("direction", "down"), params.get("amount", 500)))
+            except Exception as exc:
+                result = f"Error: Browser scroll failed: {exc}."
+        else:
+            result = "Error: Focus the intended browser before scrolling."
         _log(player, result)
         return result
 
@@ -1407,20 +1460,7 @@ def browser_control(
                 old_failsafe = getattr(pyautogui, "FAILSAFE", True)
                 try:
                     pyautogui.FAILSAFE = False
-                    if action == "scroll":
-                        direction = params.get("direction", "down").lower().strip()
-                        amount    = int(params.get("amount", 500))
-                        clicks    = max(1, min(10, round(abs(amount) / 120)))
-                        clicks    = -clicks if direction == "down" else clicks
-                        # Ensure mouse cursor is in the viewport center, not on the titlebar or minimize icon
-                        sw, sh = pyautogui.size()
-                        cx, cy = pyautogui.position()
-                        if cy < 120 or cy > sh - 60 or cx < 60 or cx > sw - 60:
-                            pyautogui.moveTo(sw // 2, sh // 2)
-                            time.sleep(0.05)
-                        pyautogui.scroll(clicks)
-                        result = f"Scrolled {direction}."
-                    elif action == "press":
+                    if action == "press":
                         key = params.get("key", "Enter")
                         pyautogui.press(key.lower())
                         result = f"Pressed {key}."

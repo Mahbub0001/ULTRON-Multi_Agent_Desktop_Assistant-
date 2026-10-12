@@ -311,6 +311,24 @@ _OS_LAUNCHERS = {
     "Linux":   _launch_linux,
 }
 
+
+def _verify_launch(app_name: str, normalized: str) -> str:
+    """Launching a process or pressing Enter in Start is not completion proof."""
+    if _SYSTEM != "Windows":
+        return f"Launch requested for {app_name}; the application window has not been verified."
+    from core.desktop_target import focus
+    from core.tool_result import VerifiedResult
+    terms = list(dict.fromkeys([app_name, normalized.removesuffix(".exe")]))
+    for _ in range(4):
+        for term in terms:
+            try:
+                hwnd = focus(term)
+                return VerifiedResult(f"Verified application window: {app_name}.", {"hwnd": hwnd, "app": app_name})
+            except Exception:
+                pass
+        time.sleep(.3)
+    return f"Error: Launch requested for {app_name}, but its window could not be verified. Inspect before retrying."
+
 def open_app(
     parameters=None,
     response=None,
@@ -332,13 +350,25 @@ def open_app(
     if player:
         player.write_log(f"[open_app] {app_name}")
 
+    # Websites must navigate before any generic browser window focus check.
+    # A Chrome window existing does not mean the requested website is open.
+    web_apps = {
+        "youtube": "https://www.youtube.com", "youtube.com": "https://www.youtube.com",
+        "yt": "https://www.youtube.com", "linkedin": "https://www.linkedin.com/feed",
+        "facebook": "https://www.facebook.com", "gmail": "https://mail.google.com",
+        "chatgpt": "https://chatgpt.com",
+    }
+    low_clean = app_name.lower().replace("folder", "").replace("directory", "").strip()
+    if low_clean in web_apps:
+        from actions.browser_control import browser_control
+        return browser_control({"action": "go_to", "url": web_apps[low_clean]}, player=player)
+
     # Check if app window is already open — if so, bring it to front
     try:
         from actions.computer_control import _focus_window
         search_terms = [app_name, normalized]
         low = app_name.lower()
-        if "youtube" in low: search_terms.extend(["YouTube", "Google Chrome", "Chrome"])
-        elif "chrome" in low: search_terms.extend(["Google Chrome", "Chrome"])
+        if "chrome" in low: search_terms.extend(["Google Chrome", "Chrome"])
         elif "vscode" in low or "visual studio code" in low or low == "code": search_terms.extend(["Visual Studio Code", "Code"])
         elif "word" in low: search_terms.extend(["Word", "Document"])
         elif "excel" in low: search_terms.append("Excel")
@@ -358,21 +388,6 @@ def open_app(
     except Exception as ex:
         print(f"[open_app] Window focus check: {ex}")
 
-    # Check if request is for YouTube
-    low_clean = app_name.lower().replace("folder", "").replace("directory", "").strip()
-    if low_clean in ("youtube", "youtube.com", "yt"):
-        try:
-            import webbrowser
-            webbrowser.open("https://www.youtube.com")
-            time.sleep(0.5)
-            from actions.computer_control import _focus_window
-            for b in ("Google Chrome", "Chrome", "YouTube", "Microsoft Edge", "Edge"):
-                if "Focused window:" in _focus_window(b):
-                    break
-            return "Opened YouTube in browser."
-        except Exception as ex:
-            print(f"[open_app] YouTube open error: {ex}")
-
     # Check if request is to open a folder or drive
     try:
         from actions.file_controller import open_folder
@@ -389,10 +404,10 @@ def open_app(
 
     try:
         if launcher(normalized):
-            return f"Opened {app_name}."
+            return _verify_launch(app_name, normalized)
         if normalized.lower() != app_name.lower():
             if launcher(app_name):
-                return f"Opened {app_name}."
+                return _verify_launch(app_name, normalized)
         return (
             f"Could not confirm that {app_name} launched. "
             f"It may still be loading, or it might not be installed."
