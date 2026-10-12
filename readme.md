@@ -118,19 +118,26 @@ Songs are cached locally in `data/music_cache/` so repeated plays are instant.
 
 ## 📱 Wireless Android Phone Control
 
+Phone navigation, quick controls, file transfer, alarms, routines and opt-in
+battery/notification alerts are available through the Android plugin. The
+optional native **ULTRON Phone** companion adds Unicode typing, accessibility
+control and notification reading/direct reply. See the complete
+[phone setup and feature guide](docs/android-phone.md).
+
 Control your Android smartphone wirelessly over local Wi-Fi without picking it up:
 
 ### Setup Guide:
 1. **Enable Developer Options:** On your phone, go to **Settings → About Phone** and tap **Build Number** 7 times.
 2. **Enable Wireless Debugging:** Go to **Settings → System / Developer Options** and turn ON **Wireless Debugging**.
-3. **Note IP & Port:** Tap Wireless Debugging to see your phone's IP (e.g., `192.168.1.105:5555`).
-4. **Connect via ADB:**
+3. **Pair the computer:** Tap **Pair device with pairing code** and note the pairing address/port.
+4. **Pair and connect via ADB:** Use the pairing dialog's port for `adb pair`, then the separate address/port shown on the main Wireless Debugging screen for `adb connect`:
    ```bash
-   adb connect <phone_ip>:5555
+   adb pair <phone_ip>:<pairing_port>
+   adb connect <phone_ip>:<debugging_port>
    ```
-   Accept the "Always allow from this computer" prompt on your phone screen.
+   Enter the phone's pairing code when prompted. Ports can change; do not assume 5555.
 5. **Save Phone IP in ULTRON:**
-   Open the settings drawer (⚙) → **📱 ANDROID PHONE**, enter your phone IP, and click **SAVE IP**.
+   Open Android Phone Control plugin settings and save the complete `IP:debugging_port`. You can also select a USB ADB serial; exactly one authorized device is auto-selected when no target is configured.
 
 ### Example Voice Commands:
 - *"Phone er flashlight on koro"* / *"Flashlight off koro"*

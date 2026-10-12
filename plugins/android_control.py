@@ -16,6 +16,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -31,7 +32,8 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-from memory.config_manager import get_android_ip, save_android_ip
+from memory.config_manager import get_android_ip, get_plugin_config
+from plugins._android_features import FEATURE_ACTIONS, PhoneFeatures, BridgeUnavailable
 
 # Windows process creation flag to prevent cmd console window popup
 if platform.system() == "Windows":
@@ -112,6 +114,11 @@ _APP_PACKAGES: dict[str, str] = {
 def _run_adb(args: list[str], timeout: float = 7.0, capture_binary: bool = False) -> tuple[int, str | bytes, str]:
     """Execute an adb command with a strict timeout. Never raises unhandled exceptions."""
     adb_cmd = _ADB_PATH or "adb"
+    if "shell" in args:
+        position = args.index("shell")
+        # adb joins separate shell arguments without escaping them. Quote each
+        # value once so labels, URLs and filenames remain data on Android.
+        args = args[:position + 1] + [shlex.join(map(str, args[position + 1:]))]
     cmd = [adb_cmd] + args
     try:
         if capture_binary:
@@ -143,9 +150,18 @@ def _run_adb(args: list[str], timeout: float = 7.0, capture_binary: bool = False
 
 def _get_target_endpoint() -> tuple[str | None, str | None]:
     """Retrieve the configured IP:port endpoint, or error message."""
-    ip = get_android_ip()
+    cfg = get_plugin_config("android_control")
+    serial = str(cfg.get("device_serial", "")).strip()
+    if serial:
+        return serial, None
+    ip = str(cfg.get("device_ip", "")).strip() or get_android_ip()
     if not ip:
-        return None, "Phone IP address is not configured. Please set the phone's IP in settings, sir."
+        rc, devices, _ = _run_adb(["devices"])
+        connected = [line.split()[0] for line in str(devices).splitlines()[1:]
+                     if len(line.split()) >= 2 and line.split()[1] == "device"] if rc == 0 else []
+        if len(connected) == 1:
+            return connected[0], None
+        return None, "Select a device serial or Wi-Fi IP in Android Phone Control settings (multiple/no authorized phones found)."
     target = ip if ":" in ip else f"{ip}:5555"
     return target, None
 
@@ -177,6 +193,9 @@ def _ensure_device_connected(target: str) -> tuple[bool, str]:
         elif state == "offline":
             _run_adb(["disconnect", target], timeout=2.0)
 
+    if ":" not in target:
+        return False, "Selected USB device is not connected or authorized. Check the cable and debugging prompt."
+
     # Attempt connection
     rc, stdout, stderr = _run_adb(["connect", target], timeout=5.0)
     out_lower = (stdout + " " + stderr).lower()
@@ -189,8 +208,10 @@ def _ensure_device_connected(target: str) -> tuple[bool, str]:
             if len(parts) >= 2 and parts[0] == target:
                 if parts[1] == "unauthorized":
                     return False, "Phone is connected but unauthorized, sir. Please accept the debugging prompt on your phone screen."
-                return True, ""
-        return True, ""
+                if parts[1] == "device":
+                    return True, ""
+                return False, f"Phone is {parts[1]}; reconnect and accept the debugging prompt."
+        return False, "ADB reported a connection, but the selected device is not authorized/ready."
 
     if "cannot connect" in out_lower or "failed to connect" in out_lower:
         return False, f"Phone connected na, ADB wireless setup age koro ({target}). Check Wi-Fi and Wireless Debugging."
@@ -202,14 +223,15 @@ def _ensure_device_connected(target: str) -> tuple[bool, str]:
 
 def _dump_ui_hierarchy(target: str) -> str | None:
     """Run uiautomator dump on the device and retrieve the active XML hierarchy."""
-    dump_remote = "/data/local/tmp/uidump.xml"
-    # Run dump
+    dump_remote = "/data/local/tmp/ultron_phone_ui.xml"
+    # Remove our previous dump so a failed inspection can never tap stale UI.
+    rc_remove, _, _ = _run_adb(["-s", target, "shell", "rm", "-f", "--", dump_remote])
+    if rc_remove != 0:
+        return None
     rc, stdout, stderr = _run_adb(["-s", target, "shell", "uiautomator", "dump", dump_remote], timeout=6.0)
     out_all = stdout + " " + stderr
-    if rc != 0 and "dumped to" not in out_all.lower():
-        # Fallback to default path
-        _run_adb(["-s", target, "shell", "uiautomator", "dump"], timeout=6.0)
-        dump_remote = "/sdcard/window_dump.xml"
+    if rc != 0 or "dumped to" not in out_all.lower():
+        return None
 
     # Read dumped XML
     rc_cat, xml_text, _ = _run_adb(["-s", target, "shell", "cat", dump_remote], timeout=5.0)
@@ -305,28 +327,49 @@ def _resolve_contact_number(contact: str) -> tuple[str | None, str | None]:
 
 # ── Action Handlers ───────────────────────────────────────────────────────────
 
+def _resolve_app_package(target: str, app_name: str) -> str | None:
+    """Resolve launchable labels through the companion, then ADB packages."""
+    query = app_name.strip().casefold()
+    try:
+        apps = PhoneFeatures(sys.modules[__name__], target).companion("apps")
+        matches = {a["package"] for a in apps if a["label"].casefold() == query or a["package"].casefold() == query}
+        if len(matches) == 1:
+            return matches.pop()
+    except BridgeUnavailable:
+        pass
+    package = _APP_PACKAGES.get(query, query)
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+", package):
+        package = ""
+    rc, out, _ = _run_adb(["-s", target, "shell", "pm", "list", "packages"])
+    installed = {line.removeprefix("package:").strip() for line in str(out).splitlines() if line.startswith("package:")} if rc == 0 else set()
+    if package in installed:
+        return package
+    matches = [p for p in installed if p.rsplit(".", 1)[-1].casefold() == query.replace(" ", "")]
+    return matches[0] if len(matches) == 1 else None
+
 def _handle_open_app(target: str, app_name: str) -> str:
     name_clean = app_name.lower().strip()
     if not name_clean:
         return "Please specify which app to open on your phone, sir."
 
-    package = _APP_PACKAGES.get(name_clean, name_clean)
-
     # Special handling for Camera (universal intent)
     if name_clean in ("camera", "video"):
-        rc, _, _ = _run_adb(["-s", target, "shell", "am", "start", "-a", "android.media.action.STILL_IMAGE_CAMERA"])
-        if rc == 0:
+        rc, out, err = _run_adb(["-s", target, "shell", "am", "start", "-a", "android.media.action.STILL_IMAGE_CAMERA"])
+        if rc == 0 and not re.search(r"Error:|SecurityException|Permission Denial", str(out) + str(err), re.I):
             time.sleep(2.0)
             return "Opened camera on your phone, sir."
 
     # Special handling for Settings (universal intent)
     if name_clean == "settings":
-        rc, _, _ = _run_adb(["-s", target, "shell", "am", "start", "-a", "android.settings.SETTINGS"])
-        if rc == 0:
+        rc, out, err = _run_adb(["-s", target, "shell", "am", "start", "-a", "android.settings.SETTINGS"])
+        if rc == 0 and not re.search(r"Error:|SecurityException|Permission Denial", str(out) + str(err), re.I):
             time.sleep(2.0)
             return "Opened settings on your phone, sir."
 
     # Launch package via monkey
+    package = _resolve_app_package(target, name_clean)
+    if not package:
+        return f"Could not uniquely resolve '{app_name}'. Use phone_list_apps and the exact app package name."
     rc, stdout, _ = _run_adb([
         "-s", target, "shell", "monkey",
         "-p", package,
@@ -350,30 +393,34 @@ def _handle_close_app(target: str, app_name: str) -> str:
     if not name_clean:
         return "Please specify which app to close on your phone, sir."
 
-    package = _APP_PACKAGES.get(name_clean, name_clean)
+    package = _resolve_app_package(target, name_clean)
+    if not package:
+        return f"Could not uniquely resolve '{app_name}'. Use phone_list_apps and the exact app package name."
     rc, stdout, stderr = _run_adb(["-s", target, "shell", "am", "force-stop", package])
-    if rc != 0:
+    if rc != 0 or re.search(r"SecurityException|Permission Denial|Error:", str(stdout) + str(stderr), re.I):
         return f"Failed to close '{app_name}' on phone: {stderr}"
 
     time.sleep(1.5)  # Delay for screen animation
     return f"Closed {app_name} on your phone, sir."
 
 
-def _handle_type_text(target: str, text: str, press_enter: bool = False) -> str:
+def _handle_type_text(target: str, text: str, press_enter: bool = False, expected_package: str = "") -> str:
     if not text:
         return "No text provided to type, sir."
 
-    # adb shell input text treats spaces as %s and requires escaping shell special chars
-    escaped = ""
-    for ch in text:
-        if ch == " ":
-            escaped += "%s"
-        elif ch in ('\\', '$', '"', "'", '`', '(', ')', '<', '>', '&', '|', ';', '*', '?', '~'):
-            escaped += f"\\{ch}"
-        else:
-            escaped += ch
-
-    rc, stdout, stderr = _run_adb(["-s", target, "shell", "input", "text", f'"{escaped}"'])
+    if expected_package or any(ord(ch) > 127 for ch in text) or "%s" in text or "\n" in text:
+        try:
+            args = {"text": text}
+            if expected_package:
+                args["expected_package"] = expected_package
+            PhoneFeatures(sys.modules[__name__], target).companion("text", **args)
+        except BridgeUnavailable as exc:
+            return f"Bangla/Unicode typing needs companion accessibility access: {exc}"
+        if press_enter:
+            PhoneFeatures(sys.modules[__name__], target).shell("input", "keyevent", 66)
+        return "Phone text entered." + (" Enter key sent." if press_enter else "")
+    escaped = text.replace(" ", "%s")
+    rc, stdout, stderr = _run_adb(["-s", target, "shell", "input", "text", escaped])
     combined = (str(stdout) + " " + str(stderr)).lower()
     if "securityexception" in combined or "inject_events" in combined:
         return "Permission needed: Please enable 'USB debugging (Security settings)' in Developer Options on your phone, sir."
@@ -382,7 +429,7 @@ def _handle_type_text(target: str, text: str, press_enter: bool = False) -> str:
 
     if press_enter:
         time.sleep(0.5)
-        _run_adb(["-s", target, "shell", "input", "keyevent", "66"])
+        PhoneFeatures(sys.modules[__name__], target).shell("input", "keyevent", 66)
 
     time.sleep(1.5)  # Delay for typing / keyboard animation
     if press_enter:
@@ -416,7 +463,16 @@ def _handle_press_key(target: str, key: str) -> str:
         "mute": "164",
     }
 
-    code = key_map.get(key_clean, key_clean)
+    if key_clean not in key_map:
+        return f"Unsupported phone key: {key}. Choose Back, Home, Recent, Enter, Wake or Sleep."
+    code = key_map[key_clean]
+    global_action = {"back": "back", "home": "home", "recent": "recent", "recents": "recent", "app_switch": "recent"}.get(key_clean)
+    if global_action:
+        try:
+            PhoneFeatures(sys.modules[__name__], target).companion("global", action=global_action)
+            return f"Pressed '{key}' on your phone, sir."
+        except BridgeUnavailable:
+            pass
     rc, stdout, stderr = _run_adb(["-s", target, "shell", "input", "keyevent", str(code)])
     combined = (str(stdout) + " " + str(stderr)).lower()
     if "securityexception" in combined or "inject_events" in combined:
@@ -440,14 +496,14 @@ def _handle_search_youtube(target: str, query: str) -> str:
     rc, stdout, stderr = _run_adb([
         "-s", target, "shell", "am", "start",
         "-a", "android.intent.action.VIEW",
-        "-d", f"'{yt_url}'",
+        "-d", yt_url,
         "-p", "com.google.android.youtube"
     ])
     if rc != 0 or "Error" in stdout:
         rc2, stdout2, stderr2 = _run_adb([
             "-s", target, "shell", "am", "start",
             "-a", "android.intent.action.VIEW",
-            "-d", f"'{yt_url}'"
+            "-d", yt_url
         ])
         if rc2 != 0:
             return f"Failed to search YouTube on phone: {stderr2 or stderr}"
@@ -470,7 +526,7 @@ def _handle_search(target: str, query: str, app: str = "youtube") -> str:
     rc, stdout, stderr = _run_adb([
         "-s", target, "shell", "am", "start",
         "-a", "android.intent.action.VIEW",
-        "-d", f"'{search_url}'"
+        "-d", search_url
     ])
     if rc != 0:
         return f"Failed to search on phone: {stderr}"
@@ -558,10 +614,12 @@ def _handle_send_whatsapp_message(target: str, contact: str, message: str) -> st
         return f"Failed to tap WhatsApp send button: {stderr_tap}"
 
     time.sleep(1.8)  # Delay after sending
-    return f"WhatsApp message sent to {contact}: '{message}', sir."
+    return f"Tapped WhatsApp Send for {contact}. Message delivery has not been verified."
 
 
 def _handle_volume(target: str, direction: str) -> str:
+    if direction == "mute":
+        return PhoneFeatures(sys.modules[__name__], target).volume(0)
     key_map = {
         "up": "24",     # KEYCODE_VOLUME_UP
         "down": "25",   # KEYCODE_VOLUME_DOWN
@@ -600,13 +658,13 @@ def _handle_screenshot(target: str) -> str:
 
     try:
         filepath.write_bytes(stdout_bytes)
-        return f"Phone screenshot captured and saved: {filepath.name}"
+        return f"Phone screenshot captured and saved: {filepath}"
     except Exception as e:
         return f"Failed to save phone screenshot: {e}"
 
 
 def _handle_lock_screen(target: str) -> str:
-    rc, stdout, stderr = _run_adb(["-s", target, "shell", "input", "keyevent", "26"]) # KEYCODE_POWER
+    rc, stdout, stderr = _run_adb(["-s", target, "shell", "input", "keyevent", "223"]) # KEYCODE_SLEEP is idempotent
     combined = (str(stdout) + " " + str(stderr)).lower()
     if "securityexception" in combined or "inject_events" in combined:
         return "Permission needed: Please enable 'USB debugging (Security settings)' in Developer Options on your phone, sir."
@@ -735,6 +793,55 @@ PLUGIN = {
     },
 }
 
+_LEGACY_ACTIONS = (
+    "phone_search_youtube", "phone_search", "phone_press_key", "phone_open_app", "phone_close_app",
+    "phone_send_whatsapp_message", "phone_type_text", "phone_tap_element", "phone_volume_up",
+    "phone_volume_down", "phone_mute", "phone_screenshot", "phone_lock_screen", "phone_battery_status", "phone_list_devices",
+)
+_ALL_ACTIONS = (*_LEGACY_ACTIONS, *FEATURE_ACTIONS)
+PLUGIN["description"] += (
+    " Extended phone features: inspect visible screen elements before selecting an indexed button/video; "
+    "scroll or long press; status (battery, Wi-Fi, Bluetooth); brightness and exact media volume; "
+    "media play/pause/next/previous; shared-storage file transfer between PC and phone; "
+    "alarms and saved routines (built-in sleep); opt-in battery/important notification alerts. "
+    "Notification reading/reply, Unicode typing, flashlight and accessibility actions use the optional ULTRON Phone companion. "
+    "Notification replies require the UI confirmation. Available actions: " + " | ".join(FEATURE_ACTIONS)
+)
+_props = PLUGIN["parameters"]["properties"]
+_props["text"]["description"] = "Text for phone_type_text. Companion Unicode/guarded typing replaces the focused field contents; inspect existing drafts and supply the complete desired text. ADB ASCII typing inserts at the cursor."
+_props["action"]["enum"] = list(_ALL_ACTIONS)
+_props["action"]["description"] = "Phone action. Use screen_elements then tap_element(index) for ordinal selections; inspect again after each screen change."
+_props.update({
+    "direction": {"type": "STRING", "enum": ["up", "down", "left", "right"], "description": "Scroll content direction."},
+    "count": {"type": "INTEGER", "description": "Scroll repetitions, 1 to 10."},
+    "index": {"type": "INTEGER", "description": "1-based index returned by the most recent phone_screen_elements. Never guess an index."},
+    "expected_package": {"type": "STRING", "description": "Expected foreground app package from screen inspection; use for tap/scroll/type/clear to stop if another app becomes active. Guarded actions require companion."},
+    "expected_text": {"type": "STRING", "description": "For phone_clear_text, clear only if the focused field still equals this exact text. Prevents clearing a changed draft."},
+    "percent": {"type": "INTEGER", "description": "Brightness or media volume percent, 0 to 100."},
+    "enabled": {"type": "BOOLEAN", "description": "Enable/disable Wi-Fi, Bluetooth or flashlight. Wi-Fi off requires USB."},
+    "command": {"type": "STRING", "enum": ["play", "pause", "play_pause", "next", "previous", "stop"], "description": "Media action."},
+    "local_path": {"type": "STRING", "description": "Absolute PC file path for push/pull. Pull defaults to downloads/phone. Existing destinations are preserved."},
+    "remote_path": {"type": "STRING", "description": "Absolute phone shared-storage path, e.g. /sdcard/Download/document.pdf. Push/pull require a filename."},
+    "offset": {"type": "INTEGER", "description": "File listing offset, starting at 0. Use returned next_offset for additional pages."},
+    "page_size": {"type": "INTEGER", "description": "File listing page size, 1 to 200, default 100."},
+    "time": {"type": "STRING", "description": "Alarm or sleep-routine wake time, local phone HH:MM (24-hour)."},
+    "label": {"type": "STRING", "description": "Alarm label."},
+    "days": {"type": "ARRAY", "items": {"type": "INTEGER"}, "description": "Repeating alarm weekdays: 1=Sunday through 7=Saturday."},
+    "routine_name": {"type": "STRING", "description": "Saved routine name or built-in sleep. Sleep pauses media, lowers media volume/brightness; optional apps/time."},
+    "apps": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Apps to close as part of the sleep routine."},
+    "notification_key": {"type": "STRING", "description": "Exact key returned by phone_notifications for a direct reply. The notification must support reply."},
+    "battery_alerts": {"type": "BOOLEAN", "description": "Opt in/out of low-battery spoken alerts while ULTRON runs."},
+    "battery_threshold": {"type": "INTEGER", "description": "Low-battery alert threshold, 1 to 50 percent."},
+    "notification_alerts": {"type": "BOOLEAN", "description": "Opt in/out of new important notification spoken alerts. Requires explicit package allowlist and companion notification access."},
+    "notification_packages": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Allowlist for notification alerts, e.g. com.whatsapp. Other apps are not announced."},
+})
+_props["steps"] = {"type": "ARRAY", "description": "1 to 20 routine steps; app, key, lock, media, brightness, volume and alarm actions only.",
+                   "items": {"type": "OBJECT", "properties": {
+                       "action": {"type": "STRING"},
+                       "parameters": {"type": "OBJECT", "properties": {k: _props[k] for k in
+                           ("app_name", "key", "percent", "command", "time", "label", "days")}},
+                   }, "required": ["action"]}}
+
 PLUGIN_SETTINGS = {
     "namespace": "android_control",
     "title": "ANDROID PHONE CONTROL",
@@ -745,7 +852,9 @@ PLUGIN_SETTINGS = {
             "type": "text",
             "placeholder": "192.168.1.xxx",
             "default": "",
-        }
+        },
+        {"key": "device_serial", "label": "ADB device serial (optional, overrides Wi-Fi IP)", "type": "text", "default": ""},
+        {"key": "companion_token", "label": "ULTRON Phone connection token", "type": "password", "default": ""},
     ],
 }
 
@@ -755,18 +864,22 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     Main entry point for android_control plugin called by JARVIS plugin loader.
     """
     params = parameters or {}
-    raw_action = params.get("action", "").lower().strip()
+    if not isinstance(params, dict):
+        return "Phone action parameters must be an object."
+    raw_action = str(params.get("action", "")).lower().strip()
 
     # Normalize action: accept both phone_<action> and legacy <action>
     action = raw_action
-    if not action.startswith("phone_") and f"phone_{action}" in (
-        "phone_search_youtube", "phone_search", "phone_press_key",
-        "phone_open_app", "phone_close_app", "phone_send_whatsapp_message",
-        "phone_type_text", "phone_tap_element", "phone_volume_up",
-        "phone_volume_down", "phone_mute", "phone_screenshot",
-        "phone_lock_screen", "phone_battery_status", "phone_list_devices"
-    ):
+    if not action.startswith("phone_") and f"phone_{action}" in _ALL_ACTIONS:
         action = f"phone_{action}"
+
+    if action not in _ALL_ACTIONS:
+        return f"Unknown Android action '{raw_action}'. Available: " + ", ".join(_ALL_ACTIONS)
+    if action in ("phone_list_routines", "phone_save_routine", "phone_delete_routine", "phone_configure_alerts"):
+        try:
+            return PhoneFeatures(sys.modules[__name__], "").dispatch(action, params)
+        except Exception as exc:
+            return f"Phone action '{action}' failed: {exc}"
 
     if not _ADB_PATH:
         return "ADB is not installed or not found on PATH, sir. Please install Android Platform Tools and add adb to PATH."
@@ -777,7 +890,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         except Exception:
             pass
 
-    print(f"[Android] > Action: {action}  Params: {params}")
+    print(f"[Android] Action: {action}")
 
     # phone_list_devices does not require a pre-configured IP
     if action == "phone_list_devices":
@@ -793,6 +906,9 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         return conn_err
 
     try:
+        features = PhoneFeatures(sys.modules[__name__], target)
+        if action in FEATURE_ACTIONS:
+            return features.dispatch(action, params)
         if action == "phone_search_youtube":
             query = params.get("query") or params.get("text") or ""
             return _handle_search_youtube(target, query)
@@ -822,11 +938,11 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         elif action == "phone_type_text":
             text_to_type = params.get("text") or params.get("query") or ""
             press_enter = bool(params.get("press_enter", False) or params.get("enter", False))
-            return _handle_type_text(target, text_to_type, press_enter=press_enter)
+            return _handle_type_text(target, text_to_type, press_enter=press_enter, expected_package=params.get("expected_package", ""))
 
         elif action == "phone_tap_element":
             element_desc = params.get("description") or params.get("element") or params.get("target") or ""
-            return _handle_tap_element(target, element_desc)
+            return features.tap(element_desc, params.get("index"), expected_package=params.get("expected_package", ""))
 
         elif action == "phone_volume_up":
             return _handle_volume(target, "up")

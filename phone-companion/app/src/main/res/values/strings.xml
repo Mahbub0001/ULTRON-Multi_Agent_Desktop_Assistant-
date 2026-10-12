@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_description">Allows your ULTRON assistant to inspect visible controls, tap, scroll and enter text when you request it. Password fields are excluded. Commands require your private connection token and an authorized ADB connection. Disable this service here at any time.</string>
+</resources>
