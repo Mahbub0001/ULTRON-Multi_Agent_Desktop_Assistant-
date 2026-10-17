@@ -38,7 +38,8 @@ def movement(before, after, direction):
     if baseline < 2:
         return None
     best = None
-    for shift in range(8, max(8, height - max(80, height // 4)), 4):
+    # Wheel distance and display scaling rarely land on multiples of four.
+    for shift in range(1, max(1, height - max(80, height // 4))):
         if direction == "down":
             old = a.crop((0, shift, width, height))
             new = b.crop((0, 0, width, height - shift))
@@ -68,25 +69,47 @@ def scroll_native(direction="down", amount=500):
         if width < 250 or height < 200:
             return "Error: Browser content is not sufficiently visible to scroll."
         region = (left + int(width * .32), top + 20, int(width * .36), height - 40)
-        clicks = max(1, min(20, round(amount / 120))) * (-1 if direction == "down" else 1)
-        for fraction in (.5, .6):
-            current = get_active_window()
-            if current.hwnd != active.hwnd or current.rect != active.rect or current.title != active.title:
-                return "Error: Browser target changed; inspect before retrying."
-            pyautogui.moveTo(left + int(width * fraction), top + height // 2)
-            time.sleep(.08)
-            before = pyautogui.screenshot(region=region)
-            pyautogui.scroll(clicks)
-            time.sleep(.4)
-            after = pyautogui.screenshot(region=region)
-            current = get_active_window()
-            if current.hwnd != active.hwnd or current.rect != active.rect or current.title != active.title:
-                return "Error: Browser target changed during scrolling; outcome uncertain."
-            pixels = movement(before, after, direction)
-            if pixels:
-                return VerifiedResult(f"Verified browser content moved {direction} (approximately {pixels}px).",
-                                      {"direction": direction, "content_movement_px": pixels})
-        return ("Error: Scroll movement could not be verified. The page may be at its boundary, "
-                "a popup may block it, or the content may need inspection. Do not report it scrolled.")
+        # Keep enough shared content between captures to prove translation.
+        # A large wheel burst can replace the entire feed and defeat read-back.
+        remaining = max(1, min(20, round(amount / 120)))
+        chunk = max(1, min(2, (height - 40) // 240))
+        total_pixels = 0
+        while remaining:
+            clicks = min(chunk, remaining) * (-1 if direction == "down" else 1)
+            pixels = _scroll_chunk(active, region, left, top, width, height, clicks, direction)
+            if isinstance(pixels, str):
+                return pixels
+            total_pixels += pixels
+            remaining -= abs(clicks)
+        return VerifiedResult(f"Verified browser content moved {direction} (approximately {total_pixels}px).",
+                              {"direction": direction, "content_movement_px": total_pixels})
     except Exception as exc:
         return f"Error: Browser scroll could not be verified: {exc}."
+
+
+def _scroll_chunk(active, region, left, top, width, height, clicks, direction):
+    import pyautogui
+    from PIL import ImageChops
+    from core.universal_operator import get_active_window
+
+    for fraction in (.5, .6):
+        current = get_active_window()
+        if current.hwnd != active.hwnd or current.rect != active.rect or current.title != active.title:
+            return "Error: Browser target changed; inspect before retrying."
+        pyautogui.moveTo(left + int(width * fraction), top + height // 2)
+        time.sleep(.08)
+        before = pyautogui.screenshot(region=region)
+        pyautogui.scroll(clicks)
+        time.sleep(.4)
+        after = pyautogui.screenshot(region=region)
+        current = get_active_window()
+        if current.hwnd != active.hwnd or current.rect != active.rect or current.title != active.title:
+            return "Error: Browser target changed during scrolling; outcome uncertain."
+        pixels = movement(before, after, direction)
+        if pixels:
+            return pixels
+        if ImageChops.difference(before.convert("RGB"), after.convert("RGB")).getbbox():
+            return ("Error: Browser content changed but scroll direction could not be verified. "
+                    "Inspect the current page before another scroll; no automatic repeat was sent.")
+    return ("Error: Scroll movement could not be verified. The page may be at its boundary, "
+            "a popup may block it, or the content may need inspection. Do not report it scrolled.")

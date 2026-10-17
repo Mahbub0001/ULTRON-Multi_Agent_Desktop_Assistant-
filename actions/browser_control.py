@@ -1336,6 +1336,7 @@ def browser_control(
                     navigation = _navigate_native_url(url)
                     if navigation.startswith("Error:"):
                         return f"Error: New tab command sent, but {navigation[7:]}"
+                    return navigation
                 return f"Sent new-tab shortcut to active browser '{active.title}'."
             except Exception as exc:
                 return f"Error: New-tab outcome uncertain: {exc}. Inspect browser before retrying."
@@ -1352,6 +1353,14 @@ def browser_control(
     if action in ("go_to", "search"):
         if action == "go_to" and _incomplete_linkedin_url(str(params.get("url") or "")):
             return "Error: Incomplete LinkedIn URL. Use smart_click on the visible navigation item or a full URL."
+        if params.get("new_tab"):
+            if action == "search":
+                base = _SEARCH_ENGINES.get(params.get("engine", "google").lower(), _SEARCH_ENGINES["google"])
+                target_url = base + quote_plus(params.get("query", ""))
+            else:
+                target_url = params.get("url", "")
+            return browser_control({"action": "new_tab", "url": target_url,
+                                    "browser": browser or ""}, player=player)
         if _registry.has(browser) and not _native_browser_window():
             sess = _registry.get(browser)
             try:

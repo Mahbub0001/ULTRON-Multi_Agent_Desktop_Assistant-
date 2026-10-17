@@ -41,7 +41,15 @@ Excel create_table needs headers and a 2D data matrix, one inner array per row;
 format_table only styles existing data. A failed native check must be inspected.
 
 After failure use new observations and a different approach. Never repeat a send,
-payment, deletion or append because its result is uncertain. Confirmation pending
+payment, deletion or append because its result is uncertain. An unverified
+reaction/toggle also requires inspection before retrying. Keep
+the exact browser window, account and post context; never launch a second browser
+to repair an interaction in the user's current session. A verified address is
+navigation evidence only, not proof of visible page content. Each observation
+must resolve a concrete uncertainty; avoid repeated focus/hover/screenshot cycles
+without new evidence or a changed approach. A scroll verification failure alone
+does not establish a broken page: inspect for movement, boundaries or overlays.
+Confirmation pending
 means WAIT, not success. On resume first inspect real state, since a worker or a
 confirmed action may have finished. Resolve prior failed steps only with evidence
 that their intended goal is now achieved. A final answer must cite verified step

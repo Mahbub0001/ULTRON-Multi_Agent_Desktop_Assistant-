@@ -87,6 +87,12 @@ class ScrollEvidence(unittest.TestCase):
         self.assertEqual(movement(image.crop((0, 0, 320, 600)),
                                   image.crop((0, 352, 320, 952)), "down"), 352)
 
+    def test_scroll_distance_need_not_be_a_multiple_of_four(self):
+        import random
+        image = Image.frombytes("L", (320, 600), random.Random(9).randbytes(320 * 600))
+        self.assertEqual(movement(image.crop((0, 0, 320, 400)),
+                                  image.crop((0, 81, 320, 481)), "down"), 81)
+
     def test_mouse_moves_into_target_window_content(self):
         active = SimpleNamespace(hwnd=42, app_category="browser", title="LinkedIn", rect=(900, 100, 1700, 900))
         before, after = self.images()
@@ -94,11 +100,26 @@ class ScrollEvidence(unittest.TestCase):
                 patch("core.browser_scroll.content_rect", return_value=(920, 240, 1680, 855)), \
                 patch("core.browser_scroll.time.sleep"), \
                 patch("pyautogui.moveTo") as move, patch("pyautogui.scroll") as wheel, \
-                patch("pyautogui.screenshot", side_effect=[before, after]):
+                patch("pyautogui.screenshot", side_effect=[before, after, before, after]):
             result = scroll_native()
         self.assertIn("Verified", result)
-        move.assert_called_once_with(1300, 547)
-        wheel.assert_called_once_with(-4)
+        self.assertEqual(move.call_count, 2)
+        move.assert_called_with(1300, 547)
+        self.assertEqual([call.args for call in wheel.call_args_list], [(-2,), (-2,)])
+        self.assertEqual(result.evidence["content_movement_px"], 160)
+
+    def test_changed_but_unverified_content_is_not_scrolled_again(self):
+        active = SimpleNamespace(hwnd=42, app_category="browser", title="LinkedIn", rect=(0, 0, 1000, 800))
+        before, after = self.images()
+        with patch("core.universal_operator.get_active_window", return_value=active), \
+                patch("core.browser_scroll.content_rect", return_value=(20, 140, 980, 755)), \
+                patch("core.browser_scroll.time.sleep"), patch("pyautogui.moveTo"), \
+                patch("core.browser_scroll.movement", return_value=None), \
+                patch("pyautogui.scroll") as wheel, \
+                patch("pyautogui.screenshot", side_effect=[before, after]):
+            result = scroll_native()
+        self.assertIn("no automatic repeat", result)
+        wheel.assert_called_once()
 
     def test_no_movement_returns_error_after_bounded_retry(self):
         active = SimpleNamespace(hwnd=42, app_category="browser", title="LinkedIn", rect=(0, 0, 1000, 800))

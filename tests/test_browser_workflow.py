@@ -7,6 +7,31 @@ from actions import browser_control as browser
 
 
 class TestNativeBrowserWorkflow(unittest.TestCase):
+    def test_navigation_request_for_new_tab_stays_in_existing_browser(self):
+        from core.tool_result import VerifiedResult
+        verified = VerifiedResult("Active browser tab address verified: https://www.linkedin.com/feed",
+                                  {"url": "https://www.linkedin.com/feed"})
+        for action, details in (("go_to", {"url": "https://www.linkedin.com/feed"}),
+                                ("search", {"query": "python", "engine": "youtube"})):
+            with self.subTest(action=action), \
+                    patch.object(browser, "_native_browser_window", return_value=SimpleNamespace(title="Chrome")), \
+                    patch.object(browser, "_navigate_native_url", return_value=verified) as navigate, \
+                    patch.object(browser, "_open_native") as launch, \
+                    patch("pyautogui.hotkey") as hotkey:
+                result = browser.browser_control({"action": action, "new_tab": True, **details})
+                self.assertIs(result, verified)
+                hotkey.assert_called_once_with("ctrl", "t")
+                navigate.assert_called_once_with(details.get("url", "https://www.youtube.com/results?search_query=python"))
+                launch.assert_not_called()
+
+    def test_new_tab_navigation_without_browser_does_not_launch_one(self):
+        with patch.object(browser, "_native_browser_window", return_value=None), \
+                patch.object(browser._registry, "has", return_value=False), \
+                patch.object(browser, "_open_native") as launch:
+            result = browser.browser_control({"action": "go_to", "url": "https://www.linkedin.com/feed", "new_tab": True})
+        self.assertTrue(result.startswith("Error:"))
+        launch.assert_not_called()
+
     def test_new_tab_uses_foreground_browser_without_launching_chrome(self):
         active = SimpleNamespace(app_category="browser", title="LinkedIn - Google Chrome")
         with patch.object(browser, "_native_browser_window", return_value=active), \
